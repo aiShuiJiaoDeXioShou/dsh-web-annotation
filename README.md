@@ -8,7 +8,6 @@
 [![DSH](https://img.shields.io/badge/DSH-0.2.1--rc.2-informational)](https://github.com/deepseek-ai/deepseek-harness)
 ![No build](https://img.shields.io/badge/build-none-success)
 
-![右侧边栏批注界面预览](docs/images/panel-light.png)
 
 ## 功能
 
