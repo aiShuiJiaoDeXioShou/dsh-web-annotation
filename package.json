@@ -1,0 +1,64 @@
+{
+  "name": "dsh-web-annotation",
+  "version": "0.1.0",
+  "description": "Annotate elements and regions in the right-Sidebar Browser tab and attach a merged report with screenshots to your next message.",
+  "type": "module",
+  "license": "MIT",
+  "author": "HXwHSJS",
+  "homepage": "https://github.com/HXwHSJS/dsh-web-annotation#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HXwHSJS/dsh-web-annotation.git"
+  },
+  "bugs": {
+    "url": "https://github.com/HXwHSJS/dsh-web-annotation/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "dsh",
+    "annotation",
+    "web-annotation",
+    "browser",
+    "webview",
+    "screenshot",
+    "ui-review"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.2",
+    "node": ">=20"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "check": "node --check index.js && node --check client.js",
+    "test": "node tests/runtime-harness.cjs",
+    "verify": "npm run check && npm test",
+    "release:pack": "npm pack"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
+      ]
+    }
+  }
+}
