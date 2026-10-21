@@ -1,7 +1,13 @@
 # Changelog
 
-## 0.1.0 — 2026-10-21
+## 0.1.1 — 2026-10-21
 
+- Fix the client bundle id: it still registered as `@local/dsh-web-annotation`,
+  which made the desktop app fail to boot after the package was renamed
+  (`duplicate factory registration` / `import failed`). The id now matches the
+  published package name.
+
+## 0.1.0 — 2026-10-21
 First public release.
 
 - Annotate any HTTP(S) page opened in the DSH right-Sidebar Browser tab: click an

@@ -36,7 +36,7 @@ DSH 社区已经有多款批注类插件（例如 [cslkkl/dsh-web-annotator](htt
 
 ### 方式 A：插件管理页（桌面端推荐）
 
-1. 从 [Releases](https://github.com/HXwHSJS/dsh-web-annotation/releases) 下载 `dsh-web-annotation-0.1.0.tgz`；
+1. 从 [Releases](https://github.com/HXwHSJS/dsh-web-annotation/releases) 下载 `dsh-web-annotation-0.1.1.tgz`；
 2. 打开 DSH 的**设置 → 插件**，使用安装入口选择本地 tgz / 填入 tgz 绝对路径安装（Desktop 的 `desktop` profile 由 Electron 管理，CLI 可能拒绝直接 `add` 它）；
 3. 完全退出并重新打开 DSH。
 
@@ -44,7 +44,7 @@ DSH 社区已经有多款批注类插件（例如 [cslkkl/dsh-web-annotator](htt
 
 ```sh
 dsh plugin --profile <profile> add \
-  https://github.com/HXwHSJS/dsh-web-annotation/releases/download/v0.1.0/dsh-web-annotation-0.1.0.tgz
+  https://github.com/HXwHSJS/dsh-web-annotation/releases/download/v0.1.1/dsh-web-annotation-0.1.1.tgz
 ```
 
 也可以直接从 GitHub 源码安装（无构建脚本，不需要 `allowBuilds`）：

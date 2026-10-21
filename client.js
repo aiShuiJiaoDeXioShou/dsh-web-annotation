@@ -1,17 +1,15 @@
 /**
  * Client half of the Web Page Annotations bundle.
  *
- * Native composer seats:
- *  - a compact "批注" toggle at the left of the composer tool row;
- *  - a tray above the composer card that lists collected annotations and sends them.
- *
- * The annotation itself happens inside the right-Sidebar Browser tab: a runtime
- * injected into the page's Electron <webview> (executeJavaScript) handles a
- * unified gesture (click = element, drag = region), draws markers and hosts the
- * inline comment editor next to the marker.
+ * Renders:
+ *  - an annotation toggle in the right-Sidebar Browser control strip;
+ *  - the "批注 xN" chip above the composer, aligned to the composer card;
+ *  - the injected runtime inside the page's Electron <webview>
+ *    (executeJavaScript), which owns the picking gestures, markers and the
+ *    inline comment bubble.
  */
 window.__ModuleLoader__.load({
-  id: '@local/dsh-web-annotation',
+  id: 'dsh-web-annotation',
   factory(require) {
     const React = require('react');
     const h = React.createElement;

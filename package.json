@@ -1,6 +1,6 @@
 {
   "name": "dsh-web-annotation",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Annotate elements and regions in the right-Sidebar Browser tab and attach a merged report with screenshots to your next message.",
   "type": "module",
   "license": "MIT",
