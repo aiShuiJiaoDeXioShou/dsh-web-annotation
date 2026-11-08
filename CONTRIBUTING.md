@@ -2,41 +2,33 @@
 
 ## Development
 
-No build step and no runtime dependencies:
-
 ```sh
-node --check index.js
-node --check client.js
-npm test          # offline runtime harness (26 checks)
-npm run verify    # both of the above
+npm ci
+npm run check   # typecheck + build + tests
+npm test        # tests only (tsx --test tests/*.test.ts)
+npm run typecheck
 ```
 
-Useful entry points:
+The browser bundle is built by `build.mjs` from `src/client/index.tsx` into
+`client/client.js`. Commit the rebuilt bundle together with source changes,
+because `link:` and GitHub installs read the built file.
 
-| File | Role |
-| --- | --- |
-| `client.js` | Web client half: sidebar control, composer chip/bridge, injected page runtime, report merging, Host pending sync. |
-| `index.js` | Host half: `/dsh-annotate/*` routes, report file writes, pending batch, `agent/pre-step` merge into the sent user message. |
-| `cordis.patch.yml` | Bundle row inserted into the profile. |
-| `tests/runtime-harness.cjs` | Extracts `runtimeMain()` from `client.js` and drives it against a DOM stub. |
+## Structure
 
-## Guidelines
+- `src/shared/` — pure data contract and formatting; no DOM/Node APIs so both
+  halves and tests can import it.
+- `src/client/runtime.ts` — self-contained function injected into the annotated
+  page. Keep it free of module imports; its `toString()` is the executeJavaScript
+  source.
+- `src/client/controller.ts` — the per-session state machine; keep the toggle
+  transition serialised and re-arm the runtime on every open.
+- `src/client/target.ts` — right-sidebar DOM discovery and runtime bridge.
+- `src/client/ui.tsx` — React surfaces for the sidebar toggle and dock row.
+- `index.js` — no-op Host entry; the plugin is client-only.
 
-- Keep the plugin runnable without a build step: plain ESM/CJS-compatible JS,
-  no new dependencies unless unavoidable.
-- Do not add telemetry, external network requests, or writes outside
-  `$DSH_HOME/annotations`.
-- When changing the pre-step merge in `index.js`, test that the session still
-  loads after a DSH restart: send one annotated message, restart, open the
-  session. The plugin must not append session events itself.
-- When changing the injected runtime, bump the runtime version in `client.js`
-  (`RUNTIME_VERSION`) so pages with a stale runtime are re-injected, and extend
-  `tests/runtime-harness.cjs` for the new behavior.
-- Keep README claims aligned with what is actually verified; note the tested DSH
-  version.
+## Tests
 
-## Pull requests
-
-Small, focused changes are preferred. Describe what was tested (commands and
-manual steps) and which DSH version/environment was used. For UI changes,
-include a screenshot of the light and dark theme where relevant.
+Add a `tests/*.test.ts` file for every behaviour change. `tests/runtime.test.ts`
+runs the injected runtime against a hand-rolled DOM stub; `tests/controller.test.ts`
+drives the open/finish/reopen lifecycle through a fake webview. No network and no
+real browser are required.

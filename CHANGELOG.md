@@ -1,32 +1,45 @@
 # Changelog
 
-## 0.1.1 — 2026-10-21
+## 0.2.0
 
-- Fix the client bundle id: it still registered as `@local/dsh-web-annotation`,
-  which made the desktop app fail to boot after the package was renamed
-  (`duplicate factory registration` / `import failed`). The id now matches the
-  published package name.
+TypeScript rewrite. This release changes the delivery model; read the README
+before upgrading.
 
-## 0.1.0 — 2026-10-21
-First public release.
+### Changed
 
-- Annotate any HTTP(S) page opened in the DSH right-Sidebar Browser tab: click an
-  element, click a blank position, or drag a region.
-- Inline comment bubble with Enter / Shift+Enter / Esc, numbered pins, edit and
-  delete, screenshot capture per annotation.
-- Save every batch under `$DSH_HOME/annotations/<sessionId>/<timestamp>/` as
-  `report.md`, `annotations.json` and numbered `NN.png` files.
-- Merge annotations from several pages/batches into one consolidated report
-  grouped by page, with all report paths listed at the end.
-- Attach the merged report to the user's next sent message through the Host
-  `agent/pre-step` hook, so the annotation becomes part of the durable, visible
-  user message (no session-log rewriting by the plugin).
-- Sending while annotation mode is still open: the open batch is persisted in
-  the background, included in the message, and the annotation session is closed
-  automatically after the message is consumed, so the same batch is never
-  attached twice.
-- Full-page transparent capture layer: page hover popups and link/focus
-  interactions are suppressed while annotating; cross-origin iframes can be
-  annotated as a whole element/region.
-- Supports the DSH plugin manager bundle format (`dsh.bundle.patch` +
-  `dsh.client`), no build step and no runtime dependencies.
+- Annotations are inserted **directly into the composer draft** through the
+  public `inputActions.insertText` API. The Markdown report middleware
+  (`/dsh-annotate/save`, `/dsh-annotate/pending`, `agent/pre-step` message
+  rewriting, `$DSH_HOME/annotations` files, screenshots on disk) is gone.
+- The bundle is now written in TypeScript and built with esbuild:
+  `src/shared` (pure data/formatting), `src/client` (runtime, controller, UI)
+  and a no-op Host entry.
+- The Host half is empty: no HTTP routes, no disk writes, no session-log
+  rewriting.
+- Reports are no longer generated; a finished batch becomes one compact text
+  block (page + selector/label + your note) in the composer.
+
+### Added
+
+- Per-annotation image attachments: pick PNG/JPEG/WebP/GIF files (up to 4 per
+  note, 8 MiB each) or paste images into the bubble. They are staged through
+  the DSH Conversation attachment service and sent as ordinary message images.
+- A live dock row above the composer with the current annotation count,
+  "insert into composer" and "cancel" actions.
+- Offline tests for the runtime, the toggle lifecycle, text formatting and
+  image conversion (`npm test`).
+
+### Fixed
+
+- Re-entering annotation mode after exiting it no longer leaves element
+  selection dead: every open re-injects and restarts the page runtime, verified
+  by a regression test.
+- Toggle transitions are serialised, so a fast double click cannot race a
+  half-finished open/close.
+- A busy composer no longer loses the batch: insertion failure keeps the page
+  annotations alive for retry.
+
+### Removed
+
+- `capturePage` screenshots and `prepareCapture` runtime API.
+- `localStorage` pending-batch persistence and the composer chip count.

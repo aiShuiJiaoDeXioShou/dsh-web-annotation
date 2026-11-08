@@ -1,154 +1,133 @@
 # dsh-web-annotation · 网页批注
 
-在 DeepSeek Harness 桌面端**右侧边栏的 Browser 标签页**里批注网页：点选元素、点击空白位置或框选区域，写下修改意见；插件会自动保存截图与结构化报告，并把**合并后的批注报告随你的下一条消息一起发送**。
+在 DeepSeek Harness 桌面端**右侧边栏的 Browser 标签页**里批注网页：点选元素、点击空白位置或框选区域，写下修改意见；结束批注时，批注文字会**直接写进当前会话的输入框**，你可以在发送前继续编辑。
 
-给"做的网页"或任意打开的网站提精确修改意见时，不用再截图、圈画、手打元素描述。
+- 无需再截图、圈画、手打元素描述；
+- 不生成 Markdown 报告、不落盘、不改写会话日志——批注就是你自己的输入框草稿；
+- 批注气泡里可以**添加图片**（选择文件或直接粘贴），结束后作为普通图片附件随消息发出。
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![DSH](https://img.shields.io/badge/DSH-0.2.1--rc.2-informational)](https://github.com/deepseek-ai/deepseek-harness)
-![No build](https://img.shields.io/badge/build-none-success)
 
+## 0.2 版的变化
+
+这是基于 [HXwHSJS/dsh-web-annotation](https://github.com/HXwHSJS/dsh-web-annotation) 的 TypeScript 重写版：
+
+| 项 | 0.1.x | 0.2.x |
+| --- | --- | --- |
+| 批注去向 | 写入磁盘报告 + 下一条消息时由 Host 合并 | **直接写入输入框**，不再有报告文件与 Host 中间件 |
+| 截图 | 每条批注自动 `capturePage` 并落盘 | 不再自动截图；需要图片时手动添加/粘贴 |
+| 图片 | 不支持 | 每条批注最多 4 张图片，作为消息图片附件发送 |
+| 代码 | 单文件 JS，无构建 | TypeScript + esbuild，`src/shared` / `src/client` 分层，带测试 |
+| 重复进入批注 | 退出后再次打开，元素选择可能失效 | 每次打开都重新注入并重启运行时，已加回归测试 |
+| Host 半 | HTTP 路由 + `agent/pre-step` 改写消息 | 空 Host 入口，纯客户端插件 |
 
 ## 功能
 
-- **连续批注**：点选元素、点空白位置（「点击位置」批注）、拖动框选区域，保存后可以接着批注下一条。
-- **就地编辑**：气泡里输入意见，`Enter` 保存、`Shift+Enter` 换行、`Esc` 取消；已保存的批注点编号可重新编辑，✓ 保存、垃圾桶删除。
-- **截图证据**：每条批注自动裁剪元素/区域截图（点击位置会带上下文），保存为 `NN.png`。
-- **报告落盘**：每一批生成 `report.md`、`annotations.json` 和截图，存放在 `$DSH_HOME/annotations/<sessionId>/<timestamp>/`，方便模型和人工复查。
-- **合并发送**：多次结束批注、多个页面得到的批注会合并成**一份总报告**（按页面分组，报告路径合并列出），不会再重复标题。
-- **自动附加**：发送消息时由 Host 把报告并入**你正在发送的那条用户消息**——消息可见、可回放，模型也直接收到；插件不直接改写会话日志。
-- **中途发送也完整**：批注模式还没结束就发送时，后台会先把这批批注落成截图/报告，随消息一起发出；消息被消费后自动退出批注模式，同一批批注不会重复附到下一条消息。
-- **页面干扰抑制**：批注模式下一层透明捕获层挡住页面自身的悬浮弹层/链接跳转；跨域 iframe 可按整个元素/区域批注（内部元素受浏览器限制无法精确批注）。
-- **轻量**：纯 JS，无构建、无运行时依赖，不改官方 Browser/Chat 提供方。
-
-## 与同类插件的区别
-
-DSH 社区已经有多款批注类插件（例如 [cslkkl/dsh-web-annotator](https://github.com/cslkkl/dsh-web-annotator)、[zhxnix/dsh-sidebar-annotations](https://github.com/zhxnix/dsh-sidebar-annotations)、[Shuffle-1992/dsh-browser-kit](https://github.com/Shuffle-1992/dsh-browser-kit)、[alaliqing/dsh-annotate](https://github.com/alaliqing/dsh-annotate)）。本插件刻意保持**窄而轻**：
-
-- 只做"网页批注 + 截图 + 报告 + 随消息发送"，不接管官方 Browser/Chat/Layout 提供方，不附带浏览器自动化、DevTools、WebHID 等能力；
-- 差异化在**证据与落盘**：每条批注都有截图和本地报告文件，批注报告作为普通消息文本随对话持久化；
-- 代价是能力不如重型套件：没有源码映射/组件链、没有画布内对象标注、没有模型侧浏览器工具。
+- **连续批注**：点选元素、点空白位置（「点击位置」批注）、拖动框选区域；保存后可以接着批注下一条。
+- **就地编辑**：气泡里输入意见，`Enter` 保存、`Shift+Enter` 换行、`Esc` 取消；已保存的批注点编号可重新编辑，`✓` 保存、垃圾桶删除。
+- **图片批注**：气泡底栏「添加图片」可选择 PNG / JPEG / WebP / GIF（每条最多 4 张、单张 ≤ 8MB），也可以直接在输入框里粘贴图片；缩略图可单独删除。
+- **写入输入框**：退出批注或点「写入输入框」后，插件把这一批批注拼成一段紧凑文字插入输入框；图片则挂到输入框的附件栏。输入框正忙时会保留页面上的批注，等你空闲后重试。
+- **多批合并**：多次批注、多个页面得到的批注会依次追加到同一份输入框草稿，按页面分组，不会覆盖你自己已经输入的内容。
+- **页面干扰抑制**：批注模式下一层透明捕获层挡住页面自身的悬浮弹层/链接跳转；跨域 iframe 可按整个元素/区域批注。
 
 ## 安装
 
-要求：**DSH 桌面端 0.2.1-rc.2**（已在此版本实机验证）。插件需要 Host 半代码，安装/更新后要**重启 DSH**。
+要求：DSH 桌面端 **≥ 0.2.2-rc.1**（在 0.2.2-rc.1 上开发验证）。
 
-### 方式 A：插件管理页（桌面端推荐）
+### 从源码安装（本 fork）
 
-1. 从 [Releases](https://github.com/HXwHSJS/dsh-web-annotation/releases) 下载 `dsh-web-annotation-0.1.1.tgz`；
-2. 打开 DSH 的**设置 → 插件**，使用安装入口选择本地 tgz / 填入 tgz 绝对路径安装（Desktop 的 `desktop` profile 由 Electron 管理，CLI 可能拒绝直接 `add` 它）；
+```sh
+git clone git@github.com:aiShuiJiaoDeXioShou/dsh-web-annotation.git
+cd dsh-web-annotation
+npm ci
+npm run build          # 生成 client/client.js
+dsh plugin --profile <profile> add "link:$PWD"
+```
+
+安装/更新后重启 DSH。
+
+### 插件管理页
+
+1. 先在上面的仓库里 `npm ci && npm run build`；
+2. 打开 DSH 的**设置 → 插件**，选择本地目录/tgz 安装；
 3. 完全退出并重新打开 DSH。
 
-### 方式 B：CLI 管理的 Web / Headless profile
+### 开发模式
 
 ```sh
-dsh plugin --profile <profile> add \
-  https://github.com/HXwHSJS/dsh-web-annotation/releases/download/v0.1.1/dsh-web-annotation-0.1.1.tgz
+npm ci
+npm run check     # typecheck + build + tests
+npm run build     # 仅重新构建客户端 bundle
 ```
 
-也可以直接从 GitHub 源码安装（无构建脚本，不需要 `allowBuilds`）：
-
-```sh
-dsh plugin --profile <profile> add github:HXwHSJS/dsh-web-annotation#<commit-sha>
-```
-
-安装后重启对应 profile 的 Host，刷新页面。
-
-### 方式 C：本地开发
-
-```sh
-git clone https://github.com/HXwHSJS/dsh-web-annotation.git
-dsh plugin --profile <profile> add "link:/absolute/path/to/dsh-web-annotation"
-```
+仓库里的 `client/client.js` 是构建产物，会随提交一起更新；`link:` 安装时 DSH 直接读取它。
 
 ## 使用
 
 1. 在会话右侧打开 **Browser** 标签页并访问任意 `http(s)` 页面；
-2. 点击侧栏控件条上的**批注图标**（分栏/全屏按钮左侧）进入批注模式；
-3. 点元素 / 点空白处 / 拖动框选，在气泡里写意见，`Enter` 保存；继续下一条；
-4. 退出批注模式后，输入框上方出现「批注 xN」小块；
-5. 正常输入并发送消息——批注报告会并入这条消息。
+2. 点击侧栏控件条上的**批注图标**（分栏按钮左侧）进入批注模式；
+3. 点元素 / 点空白处 / 拖动框选，在气泡里写意见，需要的话点「添加图片」或粘贴图片，`Enter` 保存；继续下一条；
+4. 再点一次批注图标（或点输入框上方「写入输入框」）结束这批批注；
+5. 批注文字已经出现在输入框里，图片也在附件栏，按正常方式发送即可。
 
-批注模式未退出就直接发送也可以：后台会保存当前批次并随消息发出，发送后自动退出批注模式。
+页面内按 `Esc` 也会结束批注模式并把当前批注写入输入框。
 
-## 发出的消息长这样
+## 写入输入框的内容
 
 ```text
-网页批注（共 3 条）
+网页批注（2 条）
 
 页面：控制台（https://example.com/#dashboard）
-页面源文件（推断）：./src/pages/dashboard.html
-1. [元素] 「导出」：按钮颜色太浅，和背景对比度不够
-2. [区域] 640×240：这块留白太大，压缩一半
+1. [元素] `button.export` 「导出」：按钮颜色太浅，和背景对比度不够
+2. [区域] 框选区域 640×240：这块留白太大，压缩一半
 
-页面：控制台（https://example.com/#settings）
-3. [元素] 「点击位置」：这里想加一个「重置」入口
-
-完整批注报告：C:\Users\<you>\.dsh\annotations\session-...\report.md；...
-批注数据：...；...
-截图目录：...；...
+（本批含 1 张图片，已作为附件加入输入框）
 ```
+
+只保留定位元素所需的最少信息（选择器 + 可见文本 + 你的意见），不再附带 HTML、样式快照和报告路径，比 0.1.x 的消息明显更短。
 
 ## 隐私与安全
 
-- **无外网请求、无遥测**。插件的 HTTP 路由由本机 DSH Host 提供，只接收 DSH 页面发来的批注数据。
-- 报告和截图只写入 `$DSH_HOME/annotations/<sessionId>/<timestamp>/`（默认 `~/.dsh/annotations`）。
-- 批注文字与报告路径会作为用户消息的一部分发给模型，和用户自己输入的文字一样；截图默认留在本地。
-- 批注模式会向当前 `<webview>` 注入运行时（`executeJavaScript`）并读取被批注页面的 DOM 信息；只在批注模式启用时运行。
-- 安全模型与漏洞报告方式见 [SECURITY.md](SECURITY.md)。
+- **无外网请求、无遥测**；0.2 版没有任何 Host HTTP 路由。
+- 不再向磁盘写报告、截图或批注数据；批注只存在于页面内存、输入框草稿和 DSH 自己的会话存储里。
+- 图片通过 DSH 的 Conversation/attachment 服务进入输入框附件栏，和用户手动添加图片走同一条路径。
+- 批注模式会向当前 `<webview>` 注入运行时并读取被批注页面的 DOM 信息；只在批注模式启用时运行。
 
 ## 已知限制
 
 - 仅桌面端（依赖右侧边栏 Browser 的 Electron `<webview>`）；Web 版右侧栏是跨域 iframe，无法注入。
 - 批注控件所在的那排侧栏按钮没有官方插件扩展位，靠实测 DOM 插入并持续校正；DSH 升级若改了这一排结构可能需要小修。
 - 气泡固定用浅色卡片，暂不跟随宿主深色主题。
-- 跨域 iframe 内部、closed Shadow DOM、Canvas 内部对象无法精确批注；iframe/Canvas 只能作为整体元素或区域批注。
-- 页面导航/刷新后页面内标记会丢失（已落盘/已发送的报告不受影响）。
-- 批注模式中途发送时，后台静默保存会为每次"批注集变化"生成报告目录；旧目录保留不自动清理（只有最新一份被消息引用）。
-- 自动附加依赖 Host 的 `agent/pre-step` 与 DSH 会话日志接口，目前以 `0.2.1-rc.2` 为验证基线；更新 DSH 后请做一次"批注 → 发送 → 重启 → 会话能加载"的回归。
+- 跨域 iframe 内部、closed Shadow DOM、Canvas 内部对象无法精确批注。
+- 页面导航/刷新后页面内标记会丢失（已经写入输入框的内容不受影响）。
+- 输入框处于提交中/只读状态时不会写入，页面上的批注会保留以便重试。
 
 ## 兼容性
 
 | 项 | 值 |
 | --- | --- |
-| DSH | 0.2.1-rc.2（验证基线） |
-| 平台 | Desktop（Windows 已验证；代码平台无关） |
+| DSH | 0.2.2-rc.1（验证基线） |
+| 平台 | Desktop（macOS 已验证；代码平台无关） |
 | 运行时依赖 | 无 |
-| 构建 | 无 |
+| 构建 | esbuild（仅开发时需要） |
 
 ## 开发
 
 ```sh
-npm run check   # node --check index.js + client.js
-npm test        # 离线运行时 harness（26 项）
-npm run verify  # 两者
+npm ci
+npm run check
 ```
 
-代码结构：
+目录：
 
-| 文件 | 作用 |
-| --- | --- |
-| `client.js` | Web 半：侧栏控件、输入框上方小块与桥、注入页面的批注运行时、报告合并、pending 同步 |
-| `index.js` | Host 半：`/dsh-annotate/*` 路由、报告落盘、pending 批次、`agent/pre-step` 把批注并入用户消息 |
-| `cordis.patch.yml` | bundle 插入 profile 的 loader 行 |
-| `tests/runtime-harness.cjs` | 从 `client.js` 抽出 `runtimeMain()`，用 DOM 桩驱动 26 项检查 |
-| `locale/*.json` | 插件管理页的标题与描述 |
+- `src/shared/` — 纯数据类型、输入框文案格式化、图片解码；
+- `src/client/runtime.ts` — 注入网页的运行时（元素/区域选择、气泡、图片）；
+- `src/client/controller.ts` — 每会话状态机（打开/结束/轮询、写入输入框、附加图片）；
+- `src/client/ui.tsx` — 侧栏批注按钮与输入框上方的批注状态条；
+- `tests/` — `node:test` 离屏测试，覆盖选择手势、重启回归、图片与写入逻辑。
 
-贡献说明见 [CONTRIBUTING.md](CONTRIBUTING.md)，更新记录见 [CHANGELOG.md](CHANGELOG.md)。
+设计说明见 [docs/REFACTOR.md](docs/REFACTOR.md)；DSH 0.2.2 客户端/输入框/附件 API 的调研记录（含 file:line 证据）见 [docs/dsh-api-notes.md](docs/dsh-api-notes.md)。
 
 ## License
 
-[MIT](LICENSE) © 2026 HXwHSJS
-
-本项目是独立社区插件，与 DeepSeek 官方无隶属关系。
-
----
-
-### English
-
-Annotate pages in the DSH right-Sidebar Browser tab: click elements, blank
-positions, or drag regions; write notes in an inline bubble; screenshots and a
-Markdown/JSON report are saved under `$DSH_HOME/annotations`. Multiple batches
-are merged into one report that is attached to your next sent message (durable
-and visible in the chat). No build step, no runtime dependencies, no telemetry.
-Requires DSH Desktop `0.2.1-rc.2`; restart DSH after install/update.
+MIT，见 [LICENSE](LICENSE)。
