@@ -54,7 +54,7 @@ const PNG =
 
 class FakeRuntime {
   alive = false
-  version = 6
+  version = 7
   active = false
   records: FakeRecord[] = []
   injected = 0
@@ -202,7 +202,7 @@ function makeHarness(options: HarnessOptions = {}) {
     }),
     ensureRuntime: async () => {
       if (options.lostRuntime === true) return false
-      if (runtime.alive && runtime.version === 6) return true
+      if (runtime.alive && runtime.version === 7) return true
       runtime.inject()
       return true
     },

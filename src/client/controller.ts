@@ -457,6 +457,8 @@ export class AnnotationController {
       editorDelete: this.deps.t('editor.delete'),
       editorConfirm: this.deps.t('editor.confirm'),
       editorAddImage: this.deps.t('editor.addImage'),
+      editorImageLabel: this.deps.t('editor.imageLabel'),
+      editorDone: this.deps.t('editor.done'),
       editorImageRemove: this.deps.t('editor.imageRemove'),
       editorImageTooLarge: this.deps.t('editor.imageTooLarge'),
       editorImageLimit: this.deps.t('editor.imageLimit'),

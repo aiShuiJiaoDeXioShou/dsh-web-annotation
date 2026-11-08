@@ -11,11 +11,12 @@ import type { AnnotationController, SessionState } from './controller.js'
 import { findChromeStrip } from './target.js'
 
 export const CSS_TEXT = [
-  '.dsh-ann-chrome-btn{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:var(--dsw-radius-sm,6px);background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;flex:none}',
+  '.dsh-ann-chrome-btn{height:28px;display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:0 8px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:500 12px/1 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;cursor:pointer;flex:none}',
   '.dsh-ann-chrome-btn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.14));color:var(--dsw-alias-label-primary)}',
-  '.dsh-ann-chrome-btn.is-active{background:var(--dsw-alias-interactive-bg-active,rgba(127,127,127,.18));color:var(--dsw-alias-brand-primary,#2563eb)}',
+  '.dsh-ann-chrome-btn.is-active,.dsh-ann-chrome-btn.has-batch{background:#EAF0FB;color:#0A5CF5}',
   '.dsh-ann-chrome-btn:disabled{opacity:.55;cursor:default}',
-  '.dsh-ann-chrome-btn svg{width:17px;height:17px}',
+  '.dsh-ann-chrome-btn svg{width:16px;height:16px;flex:none}',
+  '.dsh-ann-chrome-label{white-space:nowrap}',
   '.dsh-ann-chrome-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#2563eb);outline-offset:1px}',
   '.dsh-ann-badge{position:absolute;top:-3px;right:-3px;min-width:14px;height:14px;padding:0 3px;border-radius:7px;background:#2563eb;color:#fff;font:600 9px/14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:center;pointer-events:none;display:none;box-sizing:border-box}',
   '.dsh-ann-dock-row{display:flex;width:100%;min-width:0;box-sizing:border-box;padding-top:2px;padding-bottom:2px}',
@@ -33,25 +34,35 @@ export const CSS_TEXT = [
   '.dsh-ann-dock.is-error{border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary,#dc2626) 45%,transparent)}',
 ].join('\n')
 
-function PenIcon() {
+/** ChatGPT-style annotate glyph: four selection corners plus a cursor arrow. */
+export function AnnotateIcon({ size = 17 }: { size?: number }) {
   return React.createElement(
     'svg',
-    { viewBox: '0 0 24 24', 'aria-hidden': 'true', focusable: 'false' },
+    { viewBox: '0 0 24 24', width: size, height: size, 'aria-hidden': 'true', focusable: 'false' },
     React.createElement('path', {
-      d: 'M4.8 19.2l1-4.2L16 4.8a1.8 1.8 0 0 1 2.6 0l.6.6a1.8 1.8 0 0 1 0 2.6L8.9 18.2l-4.1 1z',
+      d: 'M4 8.6V6.7A2.7 2.7 0 0 1 6.7 4h1.9M15.4 4h1.9A2.7 2.7 0 0 1 20 6.7v1.9M20 15.4v1.9a2.7 2.7 0 0 1-2.7 2.7h-1.9M8.6 20H6.7A2.7 2.7 0 0 1 4 17.3v-1.9',
       fill: 'none',
       stroke: 'currentColor',
-      'stroke-width': '1.7',
+      'stroke-width': '1.8',
+      'stroke-linecap': 'round',
       'stroke-linejoin': 'round',
     }),
     React.createElement('path', {
-      d: 'M13.9 6.9l3.2 3.2',
+      d: 'M11.4 10.4l7 2.8-3.2 1.2-1.2 3.2z',
+      fill: 'none',
       stroke: 'currentColor',
-      'stroke-width': '1.7',
+      'stroke-width': '1.8',
+      'stroke-linejoin': 'round',
       'stroke-linecap': 'round',
     }),
   )
 }
+
+const ANNOTATE_GLYPH_HTML =
+  '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">' +
+  '<path d="M4 8.6V6.7A2.7 2.7 0 0 1 6.7 4h1.9M15.4 4h1.9A2.7 2.7 0 0 1 20 6.7v1.9M20 15.4v1.9a2.7 2.7 0 0 1-2.7 2.7h-1.9M8.6 20H6.7A2.7 2.7 0 0 1 4 17.3v-1.9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>' +
+  '<path d="M11.4 10.4l7 2.8-3.2 1.2-1.2 3.2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>' +
+  '</svg>'
 
 function useSessionState(controller: AnnotationController, sessionId: string): SessionState {
   const store = controller.storeFor(sessionId)
@@ -86,8 +97,11 @@ export function ChromeToggle({ controller, t }: ChromeToggleProps): null {
     const button = document.createElement('button')
     button.type = 'button'
     button.className = 'dsh-ann-chrome-btn'
-    button.innerHTML =
-      '<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M6.3 4.1 L19.4 11.3 L13.2 12.7 L10.4 19.4 Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/></svg>'
+    button.innerHTML = ANNOTATE_GLYPH_HTML
+    const buttonLabel = document.createElement('span')
+    buttonLabel.className = 'dsh-ann-chrome-label'
+    buttonLabel.textContent = t('toggle.label')
+    button.appendChild(buttonLabel)
     container.appendChild(button)
     container.appendChild(badge)
 
@@ -100,6 +114,7 @@ export function ChromeToggle({ controller, t }: ChromeToggleProps): null {
       const open = state.open === true
       const count = state.records.length
       button.classList.toggle('is-active', open)
+      button.classList.toggle('has-batch', !open && count > 0)
       button.disabled = state.busy
       const label = open ? t('toggle.exit') : count > 0 ? fill(t('toggle.resume'), { count }) : t('toggle.title')
       button.title = label
@@ -236,7 +251,7 @@ export function ComposerDock({ controller, sessionId, inputActions, t }: Compose
       React.createElement(
         'div',
         { className: 'dsh-ann-dock' + (hint.kind === 'error' ? ' is-error' : hint.kind === 'warn' ? ' is-warn' : '') },
-        PenIcon(),
+        React.createElement(AnnotateIcon, { size: 15 }),
         React.createElement('span', { className: 'dsh-ann-dock-text' }, hint.text),
         React.createElement(
           'button',
@@ -329,7 +344,7 @@ export function ComposerDock({ controller, sessionId, inputActions, t }: Compose
     React.createElement(
       'div',
       { className: 'dsh-ann-dock' + (state.hint !== null && state.hint.kind !== 'info' ? ' is-warn' : '') + (paused ? ' is-paused' : '') },
-      PenIcon(),
+      React.createElement(AnnotateIcon, { size: 15 }),
       React.createElement(
         'span',
         { className: 'dsh-ann-dock-text' },

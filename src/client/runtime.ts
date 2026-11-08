@@ -40,7 +40,7 @@ import type {
  * `runtimeMain` in sync: the injected function source cannot reference module
  * scope, so it must stay a literal there.
  */
-export const RUNTIME_VERSION = 6
+export const RUNTIME_VERSION = 7
 
 /** Options accepted when the runtime source is injected into the page. */
 export interface RuntimeMainOptions {
@@ -76,7 +76,7 @@ export interface RuntimeApi {
 export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | null): RuntimeApi {
   'use strict'
   var KEY = '__DSH_WEB_ANNOTATE__'
-  var VERSION = 6
+  var VERSION = 7
   var Z = 2147483600
   var MAX_IMAGES = 4
   var MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -85,6 +85,16 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     'image/jpeg': true,
     'image/webp': true,
     'image/gif': true,
+  }
+  // Palette aligned with ChatGPT's annotation UI (blue frame + accent badges).
+  var UI = {
+    blue: '#0A5CF5',
+    accent: '#3493F9',
+    hoverFill: 'rgba(10,92,245,0.07)',
+    recordFill: 'rgba(10,92,245,0.05)',
+    chipBg: '#EAF0FB',
+    editorText: '#1b1d22',
+    muted: '#6b7280',
   }
 
   // Replace a previous instance in the same page, if any.
@@ -130,6 +140,7 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
   var hoverBox: any = null
   var regionBox: any = null
   var bar: any = null
+  var styleTag: any = null
   var layerFresh = false
   var listenersInstalled = false
   var disposed = false
@@ -432,6 +443,29 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     }
   }
 
+  /** One injected stylesheet for hover/active polish (inline styles cover the rest). */
+  function ensureStyleTag() {
+    if (styleTag !== null && connected(styleTag)) return
+    styleTag = document.createElement('style')
+    styleTag.setAttribute('data-dsh-annotate', 'style')
+    styleTag.textContent = [
+      '[data-dsh-annotate="pin"]{transition:transform .12s ease, box-shadow .12s ease}',
+      '[data-dsh-annotate="pin"]:hover{transform:translate(-50%,-50%) scale(1.08)!important;box-shadow:0 4px 14px rgba(10,92,245,.42)!important}',
+      '[data-dsh-annotate="hud"] button{transition:background-color .12s ease,opacity .12s ease}',
+      '[data-dsh-annotate="hud"] button:hover:not(:disabled){background:rgba(255,255,255,.12)!important}',
+      '[data-dsh-annotate="hud-write"]:hover:not(:disabled){background:#2f74ff!important}',
+      '[data-dsh-annotate="editor"] button{transition:background-color .12s ease,color .12s ease}',
+      '[data-dsh-annotate="editor-add-image"]:hover{background:' + UI.chipBg + '!important;color:' + UI.blue + '!important}',
+      '[data-dsh-annotate="editor-delete"]:hover{background:rgba(220,38,38,.10)!important;color:#dc2626!important}',
+      '[data-dsh-annotate="editor-image-remove"]:hover{background:#111827!important}',
+      '[data-dsh-annotate="editor"]:focus-within{border-color:rgba(10,92,245,.45)!important}',
+      '[data-dsh-annotate="editor-input"]::placeholder{color:#9aa3b2}',
+      '[data-dsh-annotate="editor-is-drop"]{border-color:rgba(10,92,245,.75)!important;background:#F5F9FF!important}',
+    ].join('')
+    var mount: any = document.documentElement || document.body || null
+    if (mount) mount.appendChild(styleTag)
+  }
+
   function ensureLayer() {
     if (connected(layer) && connected(captureLayer)) return layer
     var stale = layer
@@ -460,14 +494,14 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     captureLayer.setAttribute('data-dsh-annotate', 'capture')
     layer.appendChild(captureLayer)
     hoverBox = makeBox({
-      position: 'absolute', display: 'none', border: '2px solid #3b82f6',
-      backgroundColor: 'rgba(59,130,246,0.14)', borderRadius: '3px',
+      position: 'absolute', display: 'none', border: '2px solid rgba(10,92,245,0.55)',
+      backgroundColor: UI.hoverFill, borderRadius: '8px',
       boxSizing: 'border-box', pointerEvents: 'none', zIndex: '1',
     })
     hoverBox.setAttribute('data-dsh-annotate', 'hover')
     regionBox = makeBox({
-      position: 'absolute', display: 'none', border: '1.5px dashed #2563eb',
-      backgroundColor: 'rgba(37,99,235,0.10)', borderRadius: '2px',
+      position: 'absolute', display: 'none', border: '1.5px dashed ' + UI.blue,
+      backgroundColor: UI.hoverFill, borderRadius: '8px',
       boxSizing: 'border-box', pointerEvents: 'none', zIndex: '1',
     })
     regionBox.setAttribute('data-dsh-annotate', 'region')
@@ -541,9 +575,9 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     if (bar !== null && bar.el && connected(bar.el)) return bar
     var el = makeBox({
       position: 'fixed', left: '50%', bottom: '18px', transform: 'translateX(-50%)',
-      display: 'none', alignItems: 'center', gap: '6px', padding: '6px 8px 6px 14px',
-      background: 'rgba(27,29,34,0.94)', color: '#ffffff', borderRadius: '999px',
-      boxShadow: '0 8px 24px rgba(15,23,42,0.32)', boxSizing: 'border-box',
+      display: 'none', alignItems: 'center', gap: '4px', padding: '5px 6px 5px 14px',
+      background: 'rgba(32,33,36,0.96)', color: '#ffffff', borderRadius: '999px',
+      boxShadow: '0 10px 30px rgba(15,23,42,0.36)', boxSizing: 'border-box',
       maxWidth: 'calc(100vw - 24px)', pointerEvents: 'auto', zIndex: '4',
       font: '500 12px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
     })
@@ -556,9 +590,11 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     var writeButton = barButton('hud-write', hudText('barWrite', 'Insert'), hudText('barWrite', 'Insert'))
     var exitButton = barButton('hud-exit', '×', hudText('barExit', 'Exit'))
     css(writeButton, {
-      background: '#2563eb', color: '#ffffff', padding: '5px 12px', marginLeft: '2px',
+      background: UI.blue, color: '#ffffff', padding: '6px 13px', marginLeft: '2px',
+      borderRadius: '999px', fontWeight: '600',
     })
-    css(exitButton, { fontSize: '16px', padding: '3px 7px', color: 'rgba(255,255,255,0.72)' })
+    css(clearButton, { color: 'rgba(255,255,255,0.68)', padding: '6px 9px' })
+    css(exitButton, { fontSize: '16px', padding: '4px 8px', color: 'rgba(255,255,255,0.62)' })
 
     clearButton.addEventListener('click', function (event: any) {
       try { event.preventDefault(); event.stopPropagation() } catch (error) { /* ignore */ }
@@ -688,8 +724,8 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     var hasSize = rect.width > 0 && rect.height > 0
     if (hasSize && record.boxEl === null) {
       var boxEl = makeBox({
-        position: 'absolute', border: '2px solid rgba(37,99,235,0.9)',
-        backgroundColor: 'rgba(37,99,235,0.10)', borderRadius: '3px',
+        position: 'absolute', border: '2px solid ' + UI.blue,
+        backgroundColor: UI.recordFill, borderRadius: '8px',
         boxSizing: 'border-box', display: 'block', pointerEvents: 'none', zIndex: '1',
       })
       place(boxEl, rect.x, rect.y, rect.width, rect.height)
@@ -699,11 +735,11 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     }
     if (record.pinEl === null) {
       var pinEl = makeBox({
-        position: 'absolute', width: '28px', height: '28px', borderRadius: '14px',
-        background: '#2563eb', color: '#ffffff', border: '2px solid #ffffff',
+        position: 'absolute', width: '26px', height: '26px', borderRadius: '50% 50% 50% 0',
+        background: UI.accent, color: '#ffffff', border: '0',
         boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        font: '600 13px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
-        boxShadow: '0 2px 6px rgba(15,23,42,0.35)', pointerEvents: 'auto', cursor: 'pointer',
+        font: '600 12.5px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+        boxShadow: '0 2px 8px rgba(10,92,245,0.38)', pointerEvents: 'auto', cursor: 'pointer',
         transform: 'translate(-50%,-50%)', zIndex: '2',
       })
       pinEl.setAttribute('data-dsh-annotate', 'pin')
@@ -913,8 +949,8 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
 
   function appendThumbnail(row: any, record: any, image: any) {
     var thumb = makeBox({
-      position: 'relative', display: 'inline-flex', width: '32px', height: '32px',
-      flex: 'none', borderRadius: '4px', overflow: 'visible',
+      position: 'relative', display: 'inline-flex', width: '52px', height: '52px',
+      flex: 'none', borderRadius: '10px', overflow: 'visible',
     })
     var img = document.createElement('img')
     img.setAttribute('data-dsh-annotate', 'editor-image')
@@ -922,8 +958,8 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     img.setAttribute('src', image.dataUrl)
     img.src = image.dataUrl
     css(img, {
-      display: 'block', width: '32px', height: '32px', objectFit: 'cover',
-      borderRadius: '4px', border: '1px solid rgba(15,23,42,0.14)', boxSizing: 'border-box',
+      display: 'block', width: '52px', height: '52px', objectFit: 'cover',
+      borderRadius: '10px', border: '1px solid rgba(15,23,42,0.10)', boxSizing: 'border-box',
       pointerEvents: 'none',
     })
     var removeButton = document.createElement('button')
@@ -934,8 +970,8 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     removeButton.title = hudText('editorImageRemove', 'Remove image')
     removeButton.textContent = '×'
     css(removeButton, {
-      position: 'absolute', top: '-5px', right: '-5px', width: '16px', height: '16px',
-      padding: '0', border: '0', borderRadius: '8px', background: '#1b1d22',
+      position: 'absolute', top: '-6px', right: '-6px', width: '18px', height: '18px',
+      padding: '0', border: '1.5px solid #ffffff', borderRadius: '9px', background: UI.editorText,
       color: '#ffffff', font: '600 11px/1 sans-serif', cursor: 'pointer',
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: '1',
     })
@@ -1083,11 +1119,12 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
       }
     }
     var editor = makeBox({
-      position: 'absolute', display: 'block', width: '260px', maxWidth: 'calc(100vw - 24px)',
-      background: '#ffffff', color: '#1b1d22', border: '1px solid rgba(15,23,42,0.14)',
-      borderRadius: '10px', boxShadow: '0 10px 28px rgba(15,23,42,0.22)',
-      padding: '8px 10px', boxSizing: 'border-box',
-      font: '13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif',
+      position: 'absolute', display: 'block', width: '300px', maxWidth: 'calc(100vw - 24px)',
+      background: '#ffffff', color: UI.editorText, border: '1px solid rgba(15,23,42,0.10)',
+      borderRadius: '16px',
+      boxShadow: '0 18px 44px rgba(15,23,42,0.20), 0 2px 8px rgba(15,23,42,0.06)',
+      padding: '10px 12px 8px', boxSizing: 'border-box',
+      font: '13px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif',
       pointerEvents: 'auto', zIndex: '3', textAlign: 'left',
     })
     editor.setAttribute('data-dsh-annotate', 'editor')
@@ -1096,26 +1133,26 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     textarea.value = record.comment || ''
     textarea.placeholder = hudText('editorPlaceholder', '')
     css(textarea, {
-      display: 'block', width: '100%', minHeight: '30px', maxHeight: '150px',
-      border: '0', outline: 'none', resize: 'none', padding: '0', margin: '0',
-      background: 'transparent', color: 'inherit', font: 'inherit', lineHeight: '1.5',
+      display: 'block', width: '100%', minHeight: '44px', maxHeight: '180px',
+      border: '0', outline: 'none', resize: 'none', padding: '2px 1px', margin: '0',
+      background: 'transparent', color: 'inherit', font: 'inherit', lineHeight: '1.55',
       overflowY: 'auto', boxSizing: 'border-box',
     })
 
     var imagesRow = makeBox({
-      display: 'none', flexWrap: 'wrap', alignItems: 'center', gap: '6px',
-      marginTop: '6px',
+      display: 'none', flexWrap: 'wrap', alignItems: 'center', gap: '8px',
+      marginTop: '8px',
     })
     imagesRow.setAttribute('data-dsh-annotate', 'editor-images')
 
     var errorEl = makeBox({
-      display: 'none', marginTop: '4px', color: '#dc2626',
+      display: 'none', marginTop: '6px', color: '#dc2626',
       font: '11px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
       wordBreak: 'break-word',
     })
     errorEl.setAttribute('data-dsh-annotate', 'editor-error')
 
-    var footer = makeBox({ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px', marginTop: '4px' })
+    var footer = makeBox({ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px', marginTop: '8px' })
 
     var addImageButton = document.createElement('button')
     addImageButton.type = 'button'
@@ -1123,11 +1160,15 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     addImageButton.setAttribute('aria-label', hudText('editorAddImage', 'Add image'))
     addImageButton.title = hudText('editorAddImage', 'Add image')
     css(addImageButton, {
-      flex: 'none', width: '24px', height: '24px', padding: '0', border: '0',
-      borderRadius: '12px', background: 'transparent', color: '#6b7280',
-      cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      flex: 'none', height: '26px', padding: '0 9px', border: '0',
+      borderRadius: '8px', background: UI.chipBg, color: UI.blue,
+      cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px',
+      font: '500 12px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
     })
-    addImageButton.innerHTML = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
+    addImageButton.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="8.6" cy="9.6" r="1.5" fill="currentColor"/><path d="M4.5 16.8l4.4-4.2a1.6 1.6 0 0 1 2.2 0l2.3 2.2 1.7-1.6a1.6 1.6 0 0 1 2.2 0l2.2 2.1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    var addImageLabel = document.createElement('span')
+    addImageLabel.textContent = hudText('editorImageLabel', 'Image')
+    addImageButton.appendChild(addImageLabel)
 
     var fileInput = document.createElement('input')
     fileInput.type = 'file'
@@ -1146,11 +1187,15 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     confirmButton.title = hudText('editorConfirm', 'save')
     confirmButton.setAttribute('aria-label', hudText('editorConfirm', 'save'))
     css(confirmButton, {
-      flex: 'none', width: '24px', height: '24px', padding: '0', border: '0',
-      borderRadius: '12px', background: 'transparent', color: '#2563eb',
-      cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      flex: 'none', height: '26px', padding: '0 11px', border: '0',
+      borderRadius: '8px', background: UI.blue, color: '#ffffff',
+      cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px',
+      font: '600 12px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
     })
-    confirmButton.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5 L10 17.5 L19 6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    confirmButton.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M5 12.5 L10 17.5 L19 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    var confirmLabel = document.createElement('span')
+    confirmLabel.textContent = hudText('editorDone', 'Done')
+    confirmButton.appendChild(confirmLabel)
     confirmButton.addEventListener('pointerdown', function (event: any) {
       try { event.stopPropagation() } catch (error) { /* ignore */ }
     })
@@ -1165,8 +1210,8 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     deleteButton.title = hudText('editorDelete', 'delete')
     deleteButton.setAttribute('aria-label', hudText('editorDelete', 'delete'))
     css(deleteButton, {
-      flex: 'none', width: '24px', height: '24px', padding: '0', border: '0',
-      borderRadius: '12px', background: 'transparent', color: '#9ca3af',
+      flex: 'none', width: '26px', height: '26px', padding: '0', border: '0',
+      borderRadius: '8px', background: 'transparent', color: UI.muted,
       cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
     })
     deleteButton.innerHTML = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13M10 11v5M14 11v5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
@@ -1206,6 +1251,31 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
       var files = clipboardImageFiles(event)
       if (files.length === 0) return
       try { event.preventDefault(); event.stopPropagation() } catch (error) { /* ignore */ }
+      queueImageFiles(record, files)
+    })
+
+    // ChatGPT-style attachment intake: paste, pick or drop images into the bubble.
+    editor.addEventListener('dragover', function (event: any) {
+      var types = event && event.dataTransfer ? event.dataTransfer.types : null
+      if (!types) return
+      var hasFiles = false
+      for (var index = 0; index < types.length; index += 1) {
+        if (types[index] === 'Files') hasFiles = true
+      }
+      if (!hasFiles) return
+      try { event.preventDefault(); event.stopPropagation() } catch (error) { /* ignore */ }
+      try { editor.style.borderColor = 'rgba(10,92,245,0.75)' } catch (error) { /* ignore */ }
+    })
+    editor.addEventListener('dragleave', function (event: any) {
+      try { event.preventDefault() } catch (error) { /* ignore */ }
+      try { editor.style.borderColor = 'rgba(15,23,42,0.10)' } catch (error) { /* ignore */ }
+    })
+    editor.addEventListener('drop', function (event: any) {
+      var transfer = event ? event.dataTransfer : null
+      var files = transfer && transfer.files ? transfer.files : []
+      if (!files || files.length === 0) return
+      try { event.preventDefault(); event.stopPropagation() } catch (error) { /* ignore */ }
+      try { editor.style.borderColor = 'rgba(15,23,42,0.10)' } catch (error) { /* ignore */ }
       queueImageFiles(record, files)
     })
 

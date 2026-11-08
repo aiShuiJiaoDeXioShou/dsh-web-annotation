@@ -111,6 +111,8 @@ export interface RuntimeHudTexts {
   editorDelete: string
   editorConfirm: string
   editorAddImage: string
+  editorImageLabel: string
+  editorDone: string
   editorImageRemove: string
   editorImageTooLarge: string
   editorImageLimit: string

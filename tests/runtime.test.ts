@@ -17,6 +17,8 @@ const HUD: RuntimeHudTexts = {
   editorDelete: '删除这条批注',
   editorConfirm: '保存并关闭',
   editorAddImage: '添加图片',
+  editorImageLabel: '图片',
+  editorDone: '完成',
   editorImageRemove: '移除图片',
   editorImageTooLarge: '图片超过 8 MiB，已忽略。',
   editorImageLimit: '每条批注最多 4 张图片。',
@@ -438,12 +440,12 @@ async function flush() {
 // Tests
 // ---------------------------------------------------------------------------
 
-test('installs the runtime API and reports version 6', () => {
+test('installs the runtime API and reports the current version', () => {
   const harness = boot()
   assert.equal(typeof harness.api, 'object')
-  assert.equal(RUNTIME_VERSION, 6)
+  assert.equal(RUNTIME_VERSION, 7)
   assert.equal(harness.api.version, RUNTIME_VERSION)
-  assert.equal(harness.api.version, 6)
+  assert.equal(harness.api.version, 7)
   for (const method of [
     'start', 'stop', 'status', 'pull', 'collect', 'collectImages',
     'openEditor', 'closeEditor', 'remove', 'clear', 'setVisible', 'dispose', 'takeAction',

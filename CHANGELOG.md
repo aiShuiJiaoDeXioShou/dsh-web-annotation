@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.2
+
+ChatGPT-aligned annotation visuals and a clearer image intake.
+
+### Changed
+
+- Sidebar toggle now uses ChatGPT's annotate glyph (selection corners + cursor)
+  and renders as a compact pill with the "批注" label; it tints ChatGPT blue when
+  annotating or while a paused batch exists, and shows the marker count badge.
+- Annotation markers restyled after ChatGPT: 2px `#0A5CF5` frame, 8px radius,
+  very light blue tint, and `#3493F9` chat-tail number badges with hover lift.
+- In-page bottom bar restyled as a ChatGPT-like dark pill (blue primary write
+  button); hover feedback for its buttons.
+- Inline annotation card restyled: 16px radius, softer elevation, roomier
+  textarea, 52px image thumbnails with white-ring remove controls, and a
+  ChatGPT-style footer with a labeled image button + blue "完成" button.
+- Image intake is now explicit and discoverable inside the annotation bubble:
+  labeled image picker, plus paste and drag-and-drop of images; all existing
+  limits (4 per note, 8 MiB, png/jpeg/webp/gif) unchanged.
+- Runtime version 7 (forces live pages to re-inject the restyled runtime).
+
 ## 0.2.1
 
 ChatGPT-style persistent annotation markers.
