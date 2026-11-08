@@ -1,17 +1,17 @@
 {
   "name": "dsh-web-annotation",
-  "version": "0.1.1",
-  "description": "Annotate elements and regions in the right-Sidebar Browser tab and attach a merged report with screenshots to your next message.",
+  "version": "0.2.0",
+  "description": "Annotate elements and regions in the right-Sidebar Browser tab; notes are written straight into the composer, with screenshot-free image attachments.",
   "type": "module",
   "license": "MIT",
   "author": "HXwHSJS",
-  "homepage": "https://github.com/HXwHSJS/dsh-web-annotation#readme",
+  "homepage": "https://github.com/aiShuiJiaoDeXioShou/dsh-web-annotation#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/HXwHSJS/dsh-web-annotation.git"
+    "url": "git+https://github.com/aiShuiJiaoDeXioShou/dsh-web-annotation.git"
   },
   "bugs": {
-    "url": "https://github.com/HXwHSJS/dsh-web-annotation/issues"
+    "url": "https://github.com/aiShuiJiaoDeXioShou/dsh-web-annotation/issues"
   },
   "keywords": [
     "dsh-plugin",
@@ -21,32 +21,39 @@
     "web-annotation",
     "browser",
     "webview",
-    "screenshot",
     "ui-review"
   ],
   "engines": {
-    "dsh": ">=0.2.1-rc.2",
+    "dsh": ">=0.2.2-rc.1",
     "node": ">=20"
   },
   "exports": {
     ".": "./index.js",
-    "./client": "./client.js",
+    "./client": "./client/client.js",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
   },
   "files": [
     "index.js",
-    "client.js",
+    "client/client.js",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
     "CHANGELOG.md"
   ],
   "scripts": {
-    "check": "node --check index.js && node --check client.js",
-    "test": "node tests/runtime-harness.cjs",
-    "verify": "npm run check && npm test",
+    "typecheck": "tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.tests.json --noEmit",
+    "build": "node build.mjs",
+    "test": "tsx --test tests/*.test.ts",
+    "check": "npm run typecheck && npm run build && npm test",
     "release:pack": "npm pack"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
   },
   "dsh": {
     "bundle": {

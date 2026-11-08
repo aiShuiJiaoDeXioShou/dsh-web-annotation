@@ -18,9 +18,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - name: Syntax check
+          cache: npm
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck, build and test
         run: npm run check
-      - name: Offline runtime harness
-        run: npm test
       - name: Package dry-run
         run: npm pack --dry-run

@@ -1,7 +1,5 @@
 node_modules/
+dist/
+client/.bundle.cjs
 *.tgz
-*.log
 .DS_Store
-Thumbs.db
-.plugin-market-cache/
-coverage/
