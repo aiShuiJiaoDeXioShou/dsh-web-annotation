@@ -34,7 +34,16 @@
 
 要求：DSH 桌面端 **≥ 0.2.2-rc.1**（在 0.2.2-rc.1 上开发验证）。
 
-### 从源码安装（本 fork）
+### 方式 A：Release tgz（最省事）
+
+```sh
+dsh plugin --profile <profile> add \
+  https://github.com/aiShuiJiaoDeXioShou/dsh-web-annotation/releases/download/v0.2.0/dsh-web-annotation-0.2.0.tgz
+```
+
+安装/更新后重启 DSH。
+
+### 方式 B：从源码安装（本 fork）
 
 ```sh
 git clone git@github.com:aiShuiJiaoDeXioShou/dsh-web-annotation.git
@@ -46,7 +55,7 @@ dsh plugin --profile <profile> add "link:$PWD"
 
 安装/更新后重启 DSH。
 
-### 插件管理页
+### 方式 C：插件管理页
 
 1. 先在上面的仓库里 `npm ci && npm run build`；
 2. 打开 DSH 的**设置 → 插件**，选择本地目录/tgz 安装；
