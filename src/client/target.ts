@@ -6,7 +6,7 @@
  * Everything here is defensive: DSH upgrades may rename presentation details,
  * and a missing node must degrade to a readable hint, never an exception.
  */
-import type { RuntimeHudTexts, RuntimeStatus } from '../shared/types.js'
+import type { RuntimeAction, RuntimeHudTexts, RuntimeStatus } from '../shared/types.js'
 
 /** Minimal surface of the Electron `<webview>` used by the annotation flow. */
 export interface BrowserView {
@@ -152,6 +152,20 @@ export async function callRuntime<T = unknown>(view: BrowserView, expression: st
   }
 }
 
+/**
+ * Make sure a compatible runtime is live without destroying an existing one.
+ *
+ * Re-injecting on every open would throw away the persistent annotation batch
+ * (ChatGPT-style markers must survive mode switches), so the existing runtime is
+ * reused whenever its reported version matches; only a missing/stale runtime is
+ * injected, and runtimeMain disposes the previous copy itself.
+ */
+export async function ensureRuntime(view: BrowserView, source: string, expectedVersion: number): Promise<boolean> {
+  const current = await callRuntime<RuntimeStatus>(view, 'status()')
+  if (current !== null && current.alive === true && current.version === expectedVersion) return true
+  return injectRuntime(view, source)
+}
+
 /** Inject (or re-inject) the page runtime; runtimeMain disposes any previous copy itself. */
 export async function injectRuntime(view: BrowserView, source: string): Promise<boolean> {
   // The guest may still be attaching when the user opens annotation mode right
@@ -196,6 +210,8 @@ export async function clearRuntime(view: BrowserView): Promise<void> {
   await callRuntime(view, 'clear()')
 }
 
-export async function collectRuntime(view: BrowserView): Promise<RuntimeStatus | null> {
-  return callRuntime<RuntimeStatus>(view, 'collect()')
+/** Consume the one-shot page-side command queue ('commit' from the bottom bar). */
+export async function takeRuntimeAction(view: BrowserView): Promise<RuntimeAction | null> {
+  const action = await callRuntime<RuntimeAction | null>(view, 'takeAction()')
+  return action === 'commit' ? 'commit' : null
 }

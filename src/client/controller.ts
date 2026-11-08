@@ -1,18 +1,18 @@
 /**
  * Per-session annotation state machine.
  *
- * Responsibilities:
- *  - serialise the toggle transition (open / finish / discard) so a fast
- *    second click can never race a half-finished transition (the old JS
- *    plugin's "reopen does nothing" bug lived in this lifecycle);
- *  - always re-inject and restart the page runtime on open, which makes the
- *    mode deterministic after any number of exits;
- *  - on finish, turn committed records into one composer text block and stage
- *    the attached images as real composer attachments;
- *  - poll the page runtime for projection state while the mode is open.
+ * The interaction follows the ChatGPT annotation model:
+ *  - the sidebar toggle arms/disarms the page gesture overlay (capture mode);
+ *  - disarming is a PAUSE, not a submit: numbered markers stay visible on the
+ *    page and their pins stay clickable for editing;
+ *  - the batch lives until the user explicitly asks to insert it into the
+ *    composer ("写入输入框", from the in-page bar or the dock row) and is only
+ *    then turned into composer text + attachments and cleared from the page.
  *
- * There is no Host half, no report file and no session-log rewriting: the
- * composer draft is the single destination of a finished batch.
+ * Toggle transitions are serialised so a fast second click cannot race a
+ * half-finished change. The page runtime is reused while it is alive (that is
+ * what keeps the markers across pause/resume); it is re-injected only when
+ * missing, stale, or when the page navigated away.
  */
 import { buildComposerText } from '../shared/text.js'
 import type {
@@ -25,7 +25,7 @@ import type {
 import { createStore, type Store } from './store.js'
 import type { AttachmentBridge, ComposerInputActions } from './attachments.js'
 import { flattenCommittedImages } from './attachments.js'
-import { callRuntime, type BrowserView, type ResolvedTarget } from './target.js'
+import { callRuntime, takeRuntimeAction, type BrowserView, type ResolvedTarget } from './target.js'
 
 export interface AnnotationHint {
   kind: 'info' | 'warn' | 'error'
@@ -40,13 +40,15 @@ export interface LastInsert {
 
 export interface SessionState {
   sessionId: string
-  /** Annotation mode is armed on the page. */
+  /** Capture mode is armed on the page (the toggle is on). */
   open: boolean
   /** A toggle transition is in flight. */
   busy: boolean
+  /** Page runtime reports itself active. */
   active: boolean
   editorOpen: boolean
   editingId: string | null
+  /** Committed annotations, kept across pause so pins stay editable. */
   records: RuntimeRecord[]
   revision: number
   pageUrl: string
@@ -64,10 +66,13 @@ export interface ControllerTimers {
 
 export interface ControllerDeps {
   resolveTarget(sessionId: string): ResolvedTarget
-  injectRuntime(view: BrowserView): Promise<boolean>
+  /** Reuse a live compatible runtime (persistent batch) or inject a fresh one. */
+  ensureRuntime(view: BrowserView): Promise<boolean>
   startRuntime(view: BrowserView, hud: RuntimeHudTexts): Promise<RuntimeStatus | null>
   stopRuntime(view: BrowserView): Promise<void>
   clearRuntime(view: BrowserView): Promise<void>
+  /** Consume the one-shot 'commit' command queued by the in-page bar. */
+  takeRuntimeAction(view: BrowserView): Promise<'commit' | null>
   getInputActions(sessionId: string): ComposerInputActions | undefined
   attachments: AttachmentBridge
   t(key: string, params?: Record<string, string | number>): string
@@ -75,7 +80,7 @@ export interface ControllerDeps {
 }
 
 const POLL_MS = 250
-const HINT_MS = 4500
+const HINT_MS = 5200
 
 export function initialState(sessionId: string): SessionState {
   return {
@@ -108,7 +113,6 @@ export class AnnotationController {
     this.deps = deps
   }
 
-  /** Store for one session; created on first access so the slot can render anytime. */
   storeFor(sessionId: string): Store<SessionState> {
     let store = this.stores.get(sessionId)
     if (store === undefined) {
@@ -133,10 +137,10 @@ export class AnnotationController {
     return this.actions.get(sessionId)
   }
 
-  /** Public entry point for the sidebar toggle and the dock buttons. */
+  /** Sidebar toggle: arm capture when paused, pause when armed. Never writes. */
   async toggle(sessionId: string): Promise<void> {
     const state = this.stateOf(sessionId)
-    if (state.open) await this.finish(sessionId)
+    if (state.open) await this.pause(sessionId)
     else await this.open(sessionId)
   }
 
@@ -145,12 +149,18 @@ export class AnnotationController {
     await this.exclusive(sessionId, () => this.openInternal(sessionId))
   }
 
-  async finish(sessionId: string): Promise<void> {
+  async pause(sessionId: string): Promise<void> {
     if (this.disposed) return
-    await this.exclusive(sessionId, () => this.finishInternal(sessionId))
+    await this.exclusive(sessionId, () => this.pauseInternal(sessionId))
   }
 
-  /** Throw away the page-side batch without inserting anything. */
+  /** Explicit submit: insert the batch into the composer, then clear the page. */
+  async write(sessionId: string): Promise<void> {
+    if (this.disposed) return
+    await this.exclusive(sessionId, () => this.writeInternal(sessionId))
+  }
+
+  /** Throw the batch away and remove every marker from the page. */
   async discard(sessionId: string): Promise<void> {
     if (this.disposed) return
     await this.exclusive(sessionId, async () => {
@@ -200,6 +210,7 @@ export class AnnotationController {
 
   private async openInternal(sessionId: string): Promise<void> {
     const store = this.storeFor(sessionId)
+    const state = store.get()
     const resolved = this.deps.resolveTarget(sessionId)
     if (resolved.ok !== true) {
       store.set({
@@ -213,37 +224,66 @@ export class AnnotationController {
       return
     }
     const view = resolved.target.view
-    const injected = await this.deps.injectRuntime(view)
-    if (!injected) {
+    const ensured = await this.deps.ensureRuntime(view)
+    if (!ensured) {
       store.set({ open: false, active: false, hint: { kind: 'error', text: this.deps.t('hint.injectFailed') } })
       return
     }
-    // A fresh start is the fix for the reopen bug: never trust overlay state
-    // left behind by a previous mode/session, always clear then arm.
-    await this.deps.clearRuntime(view)
     const status = await this.deps.startRuntime(view, this.hudTexts())
     if (status === null) {
       store.set({ open: false, active: false, hint: { kind: 'error', text: this.deps.t('hint.injectFailed') } })
       return
     }
     this.views.set(sessionId, view)
+    const records = Array.isArray(status.records) ? status.records : []
+    // The runtime is the source of truth: if it lost a previously stored batch
+    // (page reload/navigation), say so instead of showing a stale count.
+    const lost = state.records.length > 0 && records.length === 0
     store.set({
       open: true,
       active: true,
-      editorOpen: false,
-      editingId: null,
-      records: [],
+      editorOpen: status.editorOpen === true,
+      editingId: typeof status.editingId === 'string' ? status.editingId : null,
+      records,
       revision: status.revision,
       pageUrl: status.url || resolved.target.pageUrl,
       pageTitle: status.title || resolved.target.pageTitle,
-      hint: null,
+      hint: lost ? { kind: 'warn', text: this.deps.t('hint.pageGone') } : null,
       lastInsert: null,
     })
     this.startPolling(sessionId)
   }
 
-  private async finishInternal(sessionId: string): Promise<void> {
+  private async pauseInternal(sessionId: string): Promise<void> {
     const store = this.storeFor(sessionId)
+    const state = store.get()
+    if (state.open !== true && state.records.length === 0) return
+    const view = this.views.get(sessionId) ?? this.resolveView(sessionId)
+    if (view !== undefined) await this.deps.stopRuntime(view)
+    // Sync first: a quick toggle-off right after creating a note must not lose
+    // the fresh record (the 250 ms poll may not have run yet).
+    const status = view === undefined ? null : await callRuntime<RuntimeStatus>(view, 'pull()').catch(() => null)
+    const records = status !== null && Array.isArray(status.records) ? status.records : state.records
+    const patch: Partial<SessionState> = {
+      open: false,
+      active: false,
+      editorOpen: false,
+      editingId: null,
+      records,
+    }
+    if (status !== null) {
+      patch.revision = status.revision
+      if (typeof status.url === 'string' && status.url !== '') patch.pageUrl = status.url
+      if (typeof status.title === 'string' && status.title !== '') patch.pageTitle = status.title
+    }
+    store.set(patch)
+    if (records.length > 0) this.startPolling(sessionId)
+    else this.stopPolling(sessionId)
+  }
+
+  private async writeInternal(sessionId: string): Promise<void> {
+    const store = this.storeFor(sessionId)
+    const state = store.get()
     const view = this.views.get(sessionId) ?? this.resolveView(sessionId)
     if (view === undefined) {
       this.resetClosed(sessionId, { kind: 'warn', text: this.deps.t('hint.pageGone') })
@@ -253,7 +293,7 @@ export class AnnotationController {
     await callRuntime(view, 'closeEditor()')
     const collected = await callRuntime<CollectedBatch>(view, 'collect()')
     if (collected === null) {
-      this.resetClosed(sessionId, { kind: 'error', text: this.deps.t('hint.captureFailed') })
+      store.set({ hint: { kind: 'error', text: this.deps.t('hint.captureFailed') } })
       return
     }
     const records = (Array.isArray(collected.records) ? collected.records : []).filter(
@@ -335,7 +375,7 @@ export class AnnotationController {
       this.hintTimers.delete(sessionId)
       const store = this.stores.get(sessionId)
       if (store === undefined) return
-      if (store.get().open) return
+      if (store.get().records.length > 0 || store.get().open) return
       store.set({ hint: null, lastInsert: null })
     }, HINT_MS)
     this.hintTimers.set(sessionId, handle)
@@ -356,40 +396,52 @@ export class AnnotationController {
     this.polls.delete(sessionId)
   }
 
-  /** Projection poll: keep the dock UI current and notice page-side exits. */
+  /** Projection poll: sync markers/editor state and consume in-page commands. */
   private async poll(sessionId: string): Promise<void> {
     const store = this.storeFor(sessionId)
     const state = store.get()
-    if (this.disposed || state.open !== true || state.busy) return
+    if (this.disposed) return
+    if (state.open !== true && state.records.length === 0) {
+      this.stopPolling(sessionId)
+      return
+    }
     const view = this.views.get(sessionId)
     if (view === undefined) return
-    let status = await callRuntime<RuntimeStatus>(view, 'pull()')
+    if (state.busy) return
+    const status = await callRuntime<RuntimeStatus>(view, 'pull()')
     if (status === null) {
-      const reinjected = await this.deps.injectRuntime(view)
-      if (!reinjected) {
+      // The guest was recreated or navigated: the batch markers are gone.
+      const ensured = await this.deps.ensureRuntime(view)
+      if (!ensured) {
         this.resetClosed(sessionId, { kind: 'warn', text: this.deps.t('hint.pageGone') })
         return
       }
-      const restarted = await this.deps.startRuntime(view, this.hudTexts())
-      if (restarted === null) {
+      if (state.records.length > 0 || state.open) {
         this.resetClosed(sessionId, { kind: 'warn', text: this.deps.t('hint.pageGone') })
-        return
       }
-      status = restarted
+      return
     }
-    if (status.active === false) {
-      // The page-side runtime left annotation mode (Esc, page teardown, ...).
-      await this.finish(sessionId)
+    if (status.action === 'commit') {
+      await this.exclusive(sessionId, async () => {
+        await this.deps.takeRuntimeAction(view)
+        await this.writeInternal(sessionId)
+      })
+      return
+    }
+    if (status.active === false && state.open === true) {
+      // Esc / bottom-bar exit: pause, keeping the markers.
+      await this.exclusive(sessionId, () => this.pauseInternal(sessionId))
       return
     }
     const patch: Partial<SessionState> = {
-      active: true,
+      active: status.active === true,
       editorOpen: status.editorOpen === true,
       editingId: typeof status.editingId === 'string' ? status.editingId : null,
     }
     if (typeof status.url === 'string' && status.url !== '' && status.url !== state.pageUrl) patch.pageUrl = status.url
     if (typeof status.title === 'string' && status.title !== '' && status.title !== state.pageTitle) patch.pageTitle = status.title
-    if (status.revision !== state.revision || status.count !== state.records.length) {
+    const serverRecords = Array.isArray(status.records) ? status.records : []
+    if (status.revision !== state.revision || serverRecords.length !== state.records.length) {
       const collected = await callRuntime<CollectedBatch>(view, 'collect()')
       if (collected !== null && Array.isArray(collected.records)) {
         patch.records = collected.records
@@ -409,14 +461,19 @@ export class AnnotationController {
       editorImageTooLarge: this.deps.t('editor.imageTooLarge'),
       editorImageLimit: this.deps.t('editor.imageLimit'),
       editorImageUnsupported: this.deps.t('editor.imageUnsupported'),
+      barTitle: this.deps.t('bar.title'),
+      barWrite: this.deps.t('bar.write'),
+      barWriting: this.deps.t('bar.writing'),
+      barClear: this.deps.t('bar.clear'),
+      barExit: this.deps.t('bar.exit'),
     }
   }
 }
 
 /**
  * Insert one block into the composer at the caret. A stale span retries once;
- * a frozen/busy composer reports failure so the controller can keep the page
- * batch intact instead of losing it.
+ * a frozen/busy composer reports failure so the controller keeps the page batch
+ * intact instead of losing it.
  */
 export function insertComposerText(actions: ComposerInputActions | undefined, text: string): boolean {
   if (actions === undefined || typeof actions.insertText !== 'function') return false

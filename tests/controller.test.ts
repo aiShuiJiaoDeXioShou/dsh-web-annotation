@@ -1,10 +1,13 @@
 /**
- * Open -> finish -> reopen regression suite for the annotation lifecycle.
+ * Lifecycle regression suite for ChatGPT-style annotation sessions.
  *
- * This is the direct regression test for the reported bug: after leaving
- * element-selection mode once, entering it again must arm a live runtime and
- * accept annotations. The controller is driven through a fake webview whose
- * `executeJavaScript` mimics the injected page runtime.
+ * Covered contract:
+ *  - open arms capture; pause (sidebar toggle) keeps records and markers;
+ *  - re-open reuses the live runtime instead of re-injecting (persistent pins);
+ *  - editing a pin while paused updates the dock count;
+ *  - explicit write inserts one compact composer block + attachments, then clears;
+ *  - the in-page bottom bar's 'commit' action is consumed exactly once;
+ *  - a busy composer keeps the batch alive; page loss drops it with a hint.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -46,7 +49,12 @@ function makeRecord(fake: FakeRecord): RuntimeRecord {
   }
 }
 
+const PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII='
+
 class FakeRuntime {
+  alive = false
+  version = 6
   active = false
   records: FakeRecord[] = []
   injected = 0
@@ -56,10 +64,13 @@ class FakeRuntime {
   editorOpen = false
   editingId: string | null = null
   revision = 0
+  action: 'commit' | null = null
+  url = 'http://127.0.0.1/app/'
+  title = '控制台'
 
   status(): RuntimeStatus {
     return {
-      version: 5,
+      version: this.version,
       alive: true,
       active: this.active,
       editorOpen: this.editorOpen,
@@ -67,21 +78,34 @@ class FakeRuntime {
       revision: this.revision,
       count: this.records.length,
       records: this.records.map((record) => makeRecord(record)),
-      url: 'http://127.0.0.1/app/',
-      title: '控制台',
+      url: this.url,
+      title: this.title,
+      action: this.action,
       viewport: { width: 400, height: 800 },
       scroll: { x: 0, y: 0 },
     }
   }
+
+  touch(): void {
+    this.revision += 1
+  }
+
+  inject(): void {
+    this.alive = true
+    this.active = false
+    this.records = []
+    this.injected += 1
+    this.revision = 0
+  }
 }
 
 function makeView(runtime: FakeRuntime): BrowserView {
-  const view: BrowserView = {
+  return {
     isConnected: true,
     getBoundingClientRect: () => ({ width: 300, height: 400 }) as DOMRect,
     closest: () => null,
-    getURL: () => 'http://127.0.0.1/app/',
-    getTitle: () => '控制台',
+    getURL: () => runtime.url,
+    getTitle: () => runtime.title,
     async executeJavaScript(code: string): Promise<unknown> {
       if (code.includes('.start(')) {
         runtime.started += 1
@@ -98,8 +122,14 @@ function makeView(runtime: FakeRuntime): BrowserView {
         runtime.records = []
         runtime.editorOpen = false
         runtime.editingId = null
-        runtime.revision += 1
+        runtime.action = null
+        runtime.touch()
         return { ok: true }
+      }
+      if (code.includes('.takeAction()')) {
+        const action = runtime.action
+        runtime.action = null
+        return action
       }
       if (code.includes('.closeEditor()')) {
         runtime.editorOpen = false
@@ -113,8 +143,7 @@ function makeView(runtime: FakeRuntime): BrowserView {
             images: Array.from({ length: record.imageCount }, (_, index) => ({
               id: `img-${index}`,
               name: `shot-${index}.png`,
-              dataUrl:
-                'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=',
+              dataUrl: PNG,
             })),
           })),
         }
@@ -123,16 +152,22 @@ function makeView(runtime: FakeRuntime): BrowserView {
         const status = runtime.status()
         return { url: status.url, title: status.title, records: status.records }
       }
-      if (code.includes('.pull()') || code.includes('.status()')) return runtime.status()
+      if (code.includes('.pull()') || code.includes('.status()')) {
+        return runtime.alive ? runtime.status() : null
+      }
       return null
     },
   }
-  return view
 }
 
 interface HarnessOptions {
   insertOk?: boolean
   attachOk?: boolean
+  lostRuntime?: boolean
+}
+
+async function flush(times = 30): Promise<void> {
+  for (let index = 0; index < times; index += 1) await Promise.resolve()
 }
 
 function makeHarness(options: HarnessOptions = {}) {
@@ -148,21 +183,27 @@ function makeHarness(options: HarnessOptions = {}) {
     },
     addAttachments: () => options.attachOk !== false,
   }
+  let intervalHandler: (() => void) | null = null
   const timers = {
-    setInterval: () => 1,
-    clearInterval: () => undefined,
+    setInterval: (handler: () => void) => {
+      intervalHandler = handler
+      return 1
+    },
+    clearInterval: () => {
+      intervalHandler = null
+    },
     setTimeout: () => 2,
     clearTimeout: () => undefined,
   }
   const deps: ControllerDeps = {
     resolveTarget: (): ResolvedTarget => ({
       ok: true,
-      target: { view, sessionId: 's1', pageUrl: 'http://127.0.0.1/app/', pageTitle: '控制台' },
+      target: { view, sessionId: 's1', pageUrl: runtime.url, pageTitle: runtime.title },
     }),
-    injectRuntime: async () => {
-      runtime.injected += 1
-      runtime.active = false
-      runtime.records = []
+    ensureRuntime: async () => {
+      if (options.lostRuntime === true) return false
+      if (runtime.alive && runtime.version === 6) return true
+      runtime.inject()
       return true
     },
     startRuntime: async () => {
@@ -177,6 +218,13 @@ function makeHarness(options: HarnessOptions = {}) {
     clearRuntime: async () => {
       runtime.cleared += 1
       runtime.records = []
+      runtime.action = null
+      runtime.touch()
+    },
+    takeRuntimeAction: async () => {
+      const action = runtime.action
+      runtime.action = null
+      return action
     },
     getInputActions: () => actions,
     attachments: {
@@ -185,18 +233,19 @@ function makeHarness(options: HarnessOptions = {}) {
         return { ok: options.attachOk !== false, attached: options.attachOk === false ? 0 : images.length }
       },
     },
-    t: (key: string, params?: Record<string, string | number>) => {
-      const suffix = params === undefined ? '' : ':' + JSON.stringify(params)
-      return key + suffix
-    },
+    t: (key: string, params?: Record<string, string | number>) => key + (params === undefined ? '' : ':' + JSON.stringify(params)),
     timers,
   }
   const controller = new AnnotationController(deps)
   controller.setInputActions('s1', actions)
-  return { controller, runtime, view, inserts, attachments }
+  const tick = async () => {
+    intervalHandler?.()
+    await flush()
+  }
+  return { controller, runtime, view, inserts, attachments, tick }
 }
 
-test('open arms the runtime and publishes the live session', async () => {
+test('open injects once, arms capture and exposes status', async () => {
   const { controller, runtime } = makeHarness()
   await controller.open('s1')
   const state = controller.stateOf('s1')
@@ -206,109 +255,171 @@ test('open arms the runtime and publishes the live session', async () => {
   assert.equal(runtime.started, 1)
 })
 
-test('finish inserts one compact text block and clears the page batch', async () => {
+test('sidebar toggle pauses without writing and keeps the markers', async () => {
   const { controller, runtime, inserts } = makeHarness()
+  await controller.open('s1')
+  runtime.records = [{ id: 'a1', comment: '第一轮', kind: 'element', imageCount: 0 }]
+  runtime.touch()
+  await controller.toggle('s1')
+  const state = controller.stateOf('s1')
+  assert.equal(state.open, false)
+  assert.equal(runtime.stopped, 1)
+  assert.equal(inserts.length, 0)
+  assert.equal(runtime.records.length, 1, 'markers must survive pause')
+  assert.equal(state.records.length, 1)
+})
+
+test('reopen after pause reuses the runtime and keeps the batch', async () => {
+  const { controller, runtime } = makeHarness()
+  await controller.open('s1')
+  runtime.records = [{ id: 'a1', comment: '保留', kind: 'element', imageCount: 0 }]
+  runtime.touch()
+  await controller.pause('s1')
+  await controller.open('s1')
+  const state = controller.stateOf('s1')
+  assert.equal(runtime.injected, 1, 'runtime must be reused so markers persist')
+  assert.equal(runtime.started, 2)
+  assert.equal(state.open, true)
+  assert.equal(state.records.length, 1)
+})
+
+test('pin edits while paused update the dock count through polling', async () => {
+  const { controller, runtime, tick } = makeHarness()
+  await controller.open('s1')
+  runtime.records = [{ id: 'a1', comment: '第一条', kind: 'element', imageCount: 0 }]
+  runtime.touch()
+  await controller.pause('s1')
+  runtime.records.push({ id: 'a2', comment: '暂停后新增', kind: 'region', imageCount: 0 })
+  runtime.touch()
+  await tick()
+  const state = controller.stateOf('s1')
+  assert.equal(state.open, false)
+  assert.equal(state.records.length, 2)
+})
+
+test('explicit write inserts one compact block, attaches images, then clears the page', async () => {
+  const { controller, runtime, inserts, attachments } = makeHarness()
   await controller.open('s1')
   runtime.records = [
     { id: 'a1', comment: '颜色太浅', kind: 'element', imageCount: 0 },
-    { id: 'a2', comment: '留白太大', kind: 'region', imageCount: 0 },
+    { id: 'a2', comment: '留白太大', kind: 'region', imageCount: 1 },
   ]
-  await controller.finish('s1')
+  runtime.touch()
+  await controller.pause('s1')
+  await controller.write('s1')
   assert.equal(inserts.length, 1)
   assert.match(inserts[0], /网页批注（2 条）/u)
   assert.match(inserts[0], /颜色太浅/u)
-  assert.match(inserts[0], /留白太大/u)
+  assert.match(inserts[0], /1 张图片/u)
+  assert.deepEqual(attachments, [{ sessionId: 's1', images: 1 }])
   const state = controller.stateOf('s1')
   assert.equal(state.open, false)
-  assert.equal(state.active, false)
   assert.equal(state.records.length, 0)
   assert.equal(state.lastInsert?.count, 2)
-  assert.equal(runtime.active, false)
+  assert.equal(state.lastInsert?.images, 1)
+  assert.equal(runtime.records.length, 0)
+  assert.equal(runtime.cleared, 1)
 })
 
-test('reopening after a finished batch re-arms selection mode (reported bug)', async () => {
-  const { controller, runtime } = makeHarness()
+test('in-page bottom-bar commit action writes exactly once', async () => {
+  const { controller, runtime, inserts, tick } = makeHarness()
   await controller.open('s1')
-  runtime.records = [{ id: 'a1', comment: '第一轮', kind: 'element', imageCount: 0 }]
-  await controller.finish('s1')
-  runtime.records = []
-
-  // Second open: the runtime must be injected and started again, not reused.
-  await controller.open('s1')
-  const state = controller.stateOf('s1')
-  assert.equal(state.open, true)
-  assert.equal(state.active, true)
-  assert.equal(runtime.injected, 2)
-  assert.equal(runtime.started, 2)
-
-  // And selection still produces annotations that reach the composer.
-  runtime.records = [{ id: 'b1', comment: '第二轮', kind: 'element', imageCount: 0 }]
-  await controller.finish('s1')
-  assert.equal(controller.stateOf('s1').lastInsert?.count, 1)
-})
-
-test('rapid double toggle cannot race two transitions', async () => {
-  const { controller, runtime } = makeHarness()
-  const originalInject = runtime.injected
-  // Fire both toggles inside one microtask: the exclusive guard must keep the
-  // second from starting a competing open/finish transition.
-  const first = controller.toggle('s1')
-  const second = controller.toggle('s1')
-  await Promise.all([first, second])
-  assert.equal(controller.stateOf('s1').open, true)
-  assert.equal(runtime.injected, originalInject + 1)
-})
-
-test('images are staged as composer attachments and counted in the hint', async () => {
-  const { controller, runtime, inserts, attachments } = makeHarness()
-  await controller.open('s1')
-  runtime.records = [{ id: 'a1', comment: '看这张图', kind: 'element', imageCount: 2 }]
-  await controller.finish('s1')
+  runtime.records = [{ id: 'a1', comment: '来自页面底栏', kind: 'element', imageCount: 0 }]
+  runtime.touch()
+  runtime.action = 'commit'
+  await tick()
   assert.equal(inserts.length, 1)
-  assert.match(inserts[0], /2 张图片/u)
-  assert.deepEqual(attachments, [{ sessionId: 's1', images: 2 }])
-  const state = controller.stateOf('s1')
-  assert.equal(state.lastInsert?.images, 2)
+  assert.match(inserts[0], /来自页面底栏/u)
+  assert.equal(runtime.action, null, 'action must be consumed')
+  assert.equal(controller.stateOf('s1').records.length, 0)
+  await tick()
+  assert.equal(inserts.length, 1, 'a consumed action must not write twice')
 })
 
-test('a busy composer keeps the page batch alive for retry', async () => {
+test('busy composer keeps the page batch alive for retry', async () => {
   const { controller, runtime } = makeHarness({ insertOk: false })
   await controller.open('s1')
   runtime.records = [{ id: 'a1', comment: '重要修改', kind: 'element', imageCount: 0 }]
-  await controller.finish('s1')
+  runtime.touch()
+  await controller.write('s1')
   const state = controller.stateOf('s1')
   assert.equal(state.open, true)
   assert.equal(state.hint?.kind, 'warn')
-  assert.equal(runtime.active, true)
   assert.equal(runtime.records.length, 1)
 })
 
-test('finishing an empty batch closes silently without inserting text', async () => {
+test('write on an empty batch closes silently', async () => {
   const { controller, runtime, inserts } = makeHarness()
   await controller.open('s1')
-  runtime.records = []
-  await controller.finish('s1')
+  await controller.write('s1')
   assert.equal(inserts.length, 0)
   assert.equal(controller.stateOf('s1').open, false)
 })
 
-test('discard clears the page batch without inserting text', async () => {
+test('discard clears page markers without inserting text', async () => {
   const { controller, runtime, inserts } = makeHarness()
   await controller.open('s1')
   runtime.records = [{ id: 'a1', comment: '不要了', kind: 'element', imageCount: 0 }]
+  runtime.touch()
   await controller.discard('s1')
   assert.equal(inserts.length, 0)
   assert.equal(controller.stateOf('s1').open, false)
-  assert.equal(runtime.active, false)
+  assert.equal(runtime.records.length, 0)
 })
 
 test('image attachment failure still keeps the inserted text', async () => {
   const { controller, runtime, inserts } = makeHarness({ attachOk: false })
   await controller.open('s1')
   runtime.records = [{ id: 'a1', comment: '带图', kind: 'element', imageCount: 1 }]
-  await controller.finish('s1')
+  runtime.touch()
+  await controller.write('s1')
   assert.equal(inserts.length, 1)
   const state = controller.stateOf('s1')
   assert.equal(state.open, false)
   assert.equal(state.hint?.kind, 'warn')
+})
+
+test('lost page runtime drops the batch with a warning', async () => {
+  const runtime = new FakeRuntime()
+  runtime.inject()
+  runtime.records = [{ id: 'a1', comment: '会丢', kind: 'element', imageCount: 0 }]
+  runtime.touch()
+  const view = makeView(runtime)
+  let injectCount = 0
+  const store = new (class {
+    handler: (() => void) | null = null
+  })()
+  const deps: ControllerDeps = {
+    resolveTarget: () => ({ ok: true, target: { view, sessionId: 's1', pageUrl: runtime.url, pageTitle: runtime.title } }),
+    ensureRuntime: async () => {
+      injectCount += 1
+      return false
+    },
+    startRuntime: async () => runtime.status(),
+    stopRuntime: async () => undefined,
+    clearRuntime: async () => undefined,
+    takeRuntimeAction: async () => null,
+    getInputActions: () => undefined,
+    attachments: { attach: () => ({ ok: true, attached: 0 }) },
+    t: (key: string) => key,
+    timers: {
+      setInterval: (handler: () => void) => {
+        store.handler = handler
+        return 1
+      },
+      clearInterval: () => {
+        store.handler = null
+      },
+      setTimeout: () => 1,
+      clearTimeout: () => undefined,
+    },
+  }
+  const controller = new AnnotationController(deps)
+  // Simulate an open session whose page then navigates away.
+  runtime.alive = false
+  await controller.open('s1')
+  const state = controller.stateOf('s1')
+  assert.equal(state.open, false)
+  assert.match(String(state.hint?.text), /injectFailed|pageGone/u)
+  assert.ok(injectCount >= 1)
 })

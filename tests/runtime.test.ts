@@ -9,7 +9,7 @@
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { runtimeMain } from '../src/client/runtime.js'
+import { runtimeMain, RUNTIME_VERSION } from '../src/client/runtime.js'
 import type { RuntimeHudTexts } from '../src/shared/types.js'
 
 const HUD: RuntimeHudTexts = {
@@ -21,6 +21,11 @@ const HUD: RuntimeHudTexts = {
   editorImageTooLarge: '图片超过 8 MiB，已忽略。',
   editorImageLimit: '每条批注最多 4 张图片。',
   editorImageUnsupported: '仅支持 png/jpeg/webp/gif 图片。',
+  barTitle: '正在批注 · {count} 条',
+  barWrite: '写入输入框',
+  barWriting: '正在写入…',
+  barClear: '清空',
+  barExit: '退出批注',
 }
 
 type AnyEl = any
@@ -433,18 +438,21 @@ async function flush() {
 // Tests
 // ---------------------------------------------------------------------------
 
-test('installs the runtime API and reports version 5', () => {
+test('installs the runtime API and reports version 6', () => {
   const harness = boot()
   assert.equal(typeof harness.api, 'object')
-  assert.equal(harness.api.version, 5)
+  assert.equal(RUNTIME_VERSION, 6)
+  assert.equal(harness.api.version, RUNTIME_VERSION)
+  assert.equal(harness.api.version, 6)
   for (const method of [
     'start', 'stop', 'status', 'pull', 'collect', 'collectImages',
-    'openEditor', 'closeEditor', 'remove', 'clear', 'setVisible', 'dispose',
+    'openEditor', 'closeEditor', 'remove', 'clear', 'setVisible', 'dispose', 'takeAction',
   ]) {
     assert.equal(typeof harness.api[method], 'function', `${method} should be a function`)
   }
   const snapshot = harness.api.status()
-  assert.equal(snapshot.version, 5)
+  assert.equal(snapshot.version, RUNTIME_VERSION)
+  assert.equal(snapshot.action, null)
   assert.equal(snapshot.alive, true)
   assert.equal(snapshot.active, false)
   assert.equal(snapshot.editorOpen, false)
@@ -462,11 +470,11 @@ test('runtime source is self-contained when passed through executeJavaScript', (
   // Provide it here so this test still proves the body has no other externals.
   const factory = new Function('window', 'document', '__name', `return (${source})`) as AnyFn
   const api = factory(page.win, page.doc, (fn: AnyFn) => fn)({ hud: HUD })
-  assert.equal(api.version, 5)
+  assert.equal(api.version, RUNTIME_VERSION)
   assert.equal(page.win.__DSH_WEB_ANNOTATE__, api)
   assert.equal(api.start().ok, true)
   assert.equal(api.status().active, true)
-  assert.equal(api.status().version, 5)
+  assert.equal(api.status().version, RUNTIME_VERSION)
   assert.equal(typeof api.collectImages, 'function')
 })
 
@@ -626,7 +634,11 @@ test('restart after stop keeps records and re-arms selection gestures', () => {
   let snapshot = harness.api.status()
   assert.equal(snapshot.active, false)
   assert.equal(snapshot.count, 1)
-  assert.equal(harness.layerEl().style.display, 'none')
+  // Paused: markers stay drawn, but the capture layer and bar are gone.
+  assert.equal(harness.layerEl().style.display, 'block')
+  assert.equal(harness.find('capture').style.display, 'none')
+  assert.equal(harness.find('capture').style.pointerEvents, 'none')
+  assert.equal(harness.find('hud').style.display, 'none')
   assert.equal(harness.api.collect().records.length, 1)
 
   assert.equal(harness.api.start({ hud: HUD }).ok, true)
@@ -634,7 +646,9 @@ test('restart after stop keeps records and re-arms selection gestures', () => {
   assert.equal(snapshot.active, true)
   assert.equal(snapshot.count, 1)
   assert.equal(harness.layerEl().style.display, 'block')
+  assert.equal(harness.find('capture').style.display, 'block')
   assert.equal(harness.find('capture').style.pointerEvents, 'auto')
+  assert.equal(harness.find('hud').style.display, 'flex')
 
   clickElement(harness)
   assert.equal(harness.api.status().editorOpen, true)
@@ -666,7 +680,7 @@ test('dispose removes the instance and re-injection re-arms annotation', () => {
   assert.equal(harness.listeners.get('pointerdown')?.length ?? 0, 0)
 
   const again = reinject(harness)
-  assert.equal(again.api.version, 5)
+  assert.equal(again.api.version, RUNTIME_VERSION)
   assert.equal(again.api.status().active, false)
   assert.equal(again.api.start({ hud: HUD }).ok, true)
   clickElement(again)
@@ -844,4 +858,214 @@ test('setVisible toggles the overlay without dropping records', () => {
   assert.equal(harness.api.setVisible(true).ok, true)
   assert.equal(harness.layerEl().style.display, 'block')
   assert.equal(harness.api.status().count, 1)
+})
+
+// ---------------------------------------------------------------------------
+// v6: ChatGPT-style pause/persist + in-page bottom action bar
+// ---------------------------------------------------------------------------
+
+function barElement(harness: Harness): AnyEl {
+  const bar = harness.find('hud')
+  assert.ok(bar !== null, 'expected the in-page bottom bar to exist')
+  return bar
+}
+
+function barTitle(harness: Harness): string {
+  return harness.find('hud-title').textContent
+}
+
+function clickBarButton(harness: Harness, attr: string) {
+  const button = harness.find(attr)
+  assert.ok(button !== null, `expected bar button ${attr}`)
+  harness.fireWindow('pointerdown', baseEvent({ target: button, clientX: 200, clientY: 860 }))
+  harness.fireWindow('pointerup', baseEvent({ target: button, clientX: 200, clientY: 860 }))
+  button.click()
+}
+
+test('stop pauses but keeps markers visible; an empty batch hides the layer', () => {
+  const harness = boot()
+  harness.api.start({ hud: HUD })
+  // Empty batch: nothing to keep, so pausing hides the overlay entirely.
+  harness.api.stop()
+  assert.equal(harness.layerEl().style.display, 'none')
+
+  harness.api.start({ hud: HUD })
+  clickElement(harness)
+  commitEditor(harness, '持久标记')
+  const pin = harness.pin('a1')
+  assert.ok(pin !== null)
+  harness.api.stop()
+
+  const snapshot = harness.api.status()
+  assert.equal(snapshot.active, false)
+  assert.equal(snapshot.count, 1)
+  assert.equal(harness.layerEl().style.display, 'block')
+  assert.ok(harness.pin('a1') !== null, 'pin must stay rendered while paused')
+  assert.equal(harness.find('capture').style.display, 'none')
+  assert.equal(harness.find('capture').style.pointerEvents, 'none')
+  assert.equal(barElement(harness).style.display, 'none')
+  assert.equal(harness.api.collect().records.length, 1)
+})
+
+test('pin click while paused reopens and saves the editor', () => {
+  const harness = boot()
+  harness.api.start({ hud: HUD })
+  clickElement(harness)
+  commitEditor(harness, '暂停前的备注')
+  harness.api.stop()
+  assert.equal(harness.api.status().active, false)
+
+  const pin = harness.pin('a1')
+  assert.ok(pin !== null)
+  harness.fireWindow('click', baseEvent({ target: pin }))
+  let snapshot = harness.api.status()
+  assert.equal(snapshot.editorOpen, true)
+  assert.equal(snapshot.editingId, 'a1')
+  assert.equal(harness.lastTextarea().value, '暂停前的备注')
+  assert.equal(snapshot.active, false, 'editing a paused pin must not resume the mode')
+
+  commitEditor(harness, '暂停后修改的备注')
+  snapshot = harness.api.status()
+  assert.equal(snapshot.editorOpen, false)
+  assert.equal(snapshot.records[0].comment, '暂停后修改的备注')
+  assert.equal(snapshot.active, false)
+  assert.equal(harness.layerEl().style.display, 'block')
+})
+
+test('escape and outside clicks work while paused', () => {
+  const harness = boot()
+  harness.api.start({ hud: HUD })
+  clickElement(harness)
+  commitEditor(harness, '原备注')
+  harness.api.stop()
+
+  harness.fireWindow('click', baseEvent({ target: harness.pin('a1') }))
+  assert.equal(harness.api.status().editorOpen, true)
+  harness.fireWindow('keydown', baseEvent({ key: 'Escape' }))
+  assert.equal(harness.api.status().editorOpen, false)
+  assert.equal(harness.api.status().records[0].comment, '原备注')
+
+  harness.fireWindow('click', baseEvent({ target: harness.pin('a1') }))
+  harness.lastTextarea().value = '暂停时点击外部保存'
+  harness.fireWindow('pointerdown', baseEvent({ target: harness.targetElement, clientX: 5, clientY: 5 }))
+  assert.equal(harness.api.status().editorOpen, false)
+  assert.equal(harness.api.status().records[0].comment, '暂停时点击外部保存')
+  assert.equal(harness.api.status().active, false)
+})
+
+test('bottom bar shows localized title/buttons and updates the count', () => {
+  const harness = boot()
+  harness.api.start({ hud: HUD })
+  const bar = barElement(harness)
+  assert.equal(bar.getAttribute('data-dsh-annotate'), 'hud')
+  assert.equal(bar.style.display, 'flex')
+  assert.equal(barTitle(harness), '正在批注 · 0 条')
+  assert.equal(harness.find('hud-clear').textContent, HUD.barClear)
+  assert.equal(harness.find('hud-write').textContent, HUD.barWrite)
+  assert.equal(harness.find('hud-exit').textContent, '×')
+  assert.equal(harness.find('hud-exit').getAttribute('aria-label'), HUD.barExit)
+
+  clickElement(harness)
+  assert.equal(barTitle(harness), '正在批注 · 1 条')
+  commitEditor(harness, '一条')
+  clickElement(harness)
+  commitEditor(harness, '两条')
+  assert.equal(barTitle(harness), '正在批注 · 2 条')
+
+  harness.api.stop()
+  assert.equal(barElement(harness).style.display, 'none')
+})
+
+test('bar write queues commit once, disables controls and takeAction consumes it', () => {
+  const harness = boot()
+  harness.api.start({ hud: HUD })
+  clickElement(harness)
+  commitEditor(harness, '待写入')
+
+  clickBarButton(harness, 'hud-write')
+  let snapshot = harness.api.status()
+  assert.equal(snapshot.action, 'commit')
+  assert.equal(snapshot.records.length, 1)
+  assert.equal(harness.find('hud-write').textContent, HUD.barWriting)
+  assert.equal(harness.find('hud-write').disabled, true)
+  assert.equal(harness.find('hud-clear').disabled, true)
+  assert.equal(harness.find('hud-exit').disabled, true)
+
+  assert.equal(harness.api.takeAction(), 'commit')
+  snapshot = harness.api.status()
+  assert.equal(snapshot.action, null)
+  assert.equal(harness.api.takeAction(), null)
+  assert.equal(harness.find('hud-write').textContent, HUD.barWrite)
+  assert.equal(harness.find('hud-write').disabled, false)
+  assert.equal(snapshot.records.length, 1)
+  assert.equal(snapshot.active, true)
+
+  // clear() also resets a queued action.
+  clickBarButton(harness, 'hud-write')
+  assert.equal(harness.api.status().action, 'commit')
+  harness.api.clear()
+  assert.equal(harness.api.status().action, null)
+})
+
+test('bar clear drops all records and pauses the mode', () => {
+  const harness = boot()
+  harness.api.start({ hud: HUD })
+  clickElement(harness)
+  commitEditor(harness, 'one')
+  clickElement(harness)
+  commitEditor(harness, 'two')
+  assert.equal(harness.api.status().count, 2)
+
+  clickBarButton(harness, 'hud-clear')
+  const snapshot = harness.api.status()
+  assert.equal(snapshot.count, 0)
+  assert.equal(snapshot.active, false)
+  assert.equal(harness.layerEl().style.display, 'none')
+  assert.equal(barElement(harness).style.display, 'none')
+  assert.deepEqual(harness.api.collectImages().records, [])
+  assert.deepEqual(harness.api.collect().records, [])
+})
+
+test('bar exit pauses while keeping the records', () => {
+  const harness = boot()
+  harness.api.start({ hud: HUD })
+  clickElement(harness)
+  commitEditor(harness, 'keep me')
+  clickBarButton(harness, 'hud-exit')
+  const snapshot = harness.api.status()
+  assert.equal(snapshot.active, false)
+  assert.equal(snapshot.count, 1)
+  assert.equal(harness.layerEl().style.display, 'block')
+  assert.ok(harness.pin('a1') !== null)
+})
+
+test('bar clicks never start an annotation gesture', () => {
+  const harness = boot()
+  harness.api.start({ hud: HUD })
+  const bar = barElement(harness)
+  const events: AnyObj[] = [
+    baseEvent({ target: bar, clientX: 200, clientY: 860 }),
+    baseEvent({ target: harness.find('hud-title'), clientX: 200, clientY: 860 }),
+    baseEvent({ target: harness.find('hud-write'), clientX: 200, clientY: 860 }),
+  ]
+  for (const event of events) {
+    harness.fireWindow('pointerdown', event)
+    harness.fireWindow('pointermove', event)
+    harness.fireWindow('pointerup', event)
+    harness.fireWindow('click', event)
+  }
+  const snapshot = harness.api.status()
+  assert.equal(snapshot.count, 0)
+  assert.equal(snapshot.editorOpen, false)
+  assert.equal(snapshot.active, true)
+
+  // Clicking within the bar region must not create a point annotation either.
+  harness.setFromPoint(() => null)
+  try {
+    harness.fireWindow('pointerdown', baseEvent({ target: bar, clientX: 200, clientY: 860 }))
+    harness.fireWindow('pointerup', baseEvent({ target: bar, clientX: 200, clientY: 860 }))
+  } finally {
+    harness.setFromPoint(() => harness.targetElement)
+  }
+  assert.equal(harness.api.status().count, 0)
 })

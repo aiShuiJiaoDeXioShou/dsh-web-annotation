@@ -1,6 +1,6 @@
 {
   "name": "dsh-web-annotation",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Annotate elements and regions in the right-Sidebar Browser tab; notes are written straight into the composer, with screenshot-free image attachments.",
   "type": "module",
   "license": "MIT",

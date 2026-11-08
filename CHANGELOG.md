@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.2.1
+
+ChatGPT-style persistent annotation markers.
+
+### Changed
+
+- Exiting annotation mode is now a **pause**, not a submit: numbered markers and
+  translucent highlights stay visible on the page, pins stay clickable for
+  editing, and the dock row above the composer keeps showing the live count.
+- The batch is only converted to composer text when the user explicitly clicks
+  "写入输入框" (in-page bottom bar or the dock row); it is then cleared from the
+  page. A busy composer keeps the batch and markers alive for retry.
+- New in-page bottom action bar while annotation mode is active
+  (`正在批注 · N 条` / clear / write / `×` exit), following the ChatGPT
+  annotation interaction.
+- The sidebar toggle now shows the live marker count even while paused and its
+  tooltip offers "继续批注（N 条标记）".
+- Runtime version 6: `stop()` pauses and keeps records; pins editable while
+  paused; `takeAction()` consumes the bottom bar's one-shot `commit` command.
+
+### Fixed
+
+- Exiting annotation mode no longer makes the whole annotation state invisible:
+  previously the page was cleared on exit, so the user could not see or continue
+  what they had annotated.
+- Toggle-off immediately after creating a fresh annotation no longer loses that
+  record from the dock (records are synced on pause).
+
 ## 0.2.0
 
 TypeScript rewrite. This release changes the delivery model; read the README

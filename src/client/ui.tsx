@@ -29,6 +29,7 @@ export const CSS_TEXT = [
   '.dsh-ann-dock-action.is-primary{background:var(--dsw-alias-brand-primary,#2563eb);border-color:transparent;color:#fff}',
   '.dsh-ann-dock-action:disabled{opacity:.55;cursor:default}',
   '.dsh-ann-dock.is-warn{border-color:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#b45309) 45%,transparent)}',
+  '.dsh-ann-dock.is-paused{border-style:dashed}',
   '.dsh-ann-dock.is-error{border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary,#dc2626) 45%,transparent)}',
 ].join('\n')
 
@@ -97,13 +98,13 @@ export function ChromeToggle({ controller, t }: ChromeToggleProps): null {
       if (currentSession === null) return
       const state = controller.stateOf(currentSession)
       const open = state.open === true
+      const count = state.records.length
       button.classList.toggle('is-active', open)
       button.disabled = state.busy
-      const label = open ? t('toggle.exit') : t('toggle.title')
+      const label = open ? t('toggle.exit') : count > 0 ? fill(t('toggle.resume'), { count }) : t('toggle.title')
       button.title = label
       button.setAttribute('aria-label', label)
       button.setAttribute('aria-pressed', open ? 'true' : 'false')
-      const count = open ? state.records.length : 0
       badge.textContent = count > 0 ? String(count) : ''
       badge.style.display = count > 0 ? 'block' : 'none'
     }
@@ -222,10 +223,11 @@ export function ComposerDock({ controller, sessionId, inputActions, t }: Compose
   }, [state.open, state.lastInsert])
 
   if (sessionId === '') return null
-  const visible = state.open || state.hint !== null
+  const hasBatch = state.records.length > 0
+  const visible = state.open || hasBatch || state.hint !== null
   if (!visible) return null
 
-  if (!state.open) {
+  if (!state.open && !hasBatch) {
     const hint = state.hint
     if (hint === null) return null
     return React.createElement(
@@ -250,26 +252,37 @@ export function ComposerDock({ controller, sessionId, inputActions, t }: Compose
   }
 
   const count = state.records.length
+  const paused = !state.open
   const editing = state.editorOpen
-  const hintText = state.hint !== null ? state.hint.text : t('dock.hint')
-  const title = count > 0 ? fill(t('dock.count'), { count }) : t('dock.title')
-  return React.createElement(
-    'div',
-    { className: 'dsh-ann-dock-row', ref: rowRef },
-    React.createElement(
-      'div',
-      { className: 'dsh-ann-dock' + (state.hint !== null && state.hint.kind !== 'info' ? ' is-warn' : '') },
-      PenIcon(),
-      React.createElement(
-        'span',
-        { className: 'dsh-ann-dock-text' },
-        title,
-        React.createElement('span', { className: 'dsh-ann-dock-hint' }, ' · ' + (editing ? t('dock.editing') : hintText)),
-      ),
-      React.createElement('span', { className: 'dsh-ann-dock-spacer' }),
+  const hintText = paused
+    ? t('dock.pausedHint')
+    : state.hint !== null
+      ? state.hint.text
+      : editing
+        ? t('dock.editing')
+        : t('dock.hint')
+  const title = hasBatch ? fill(t('dock.count'), { count }) : t('dock.title')
+  const buttons: React.ReactNode[] = []
+  if (paused) {
+    buttons.push(
       React.createElement(
         'button',
         {
+          key: 'resume',
+          type: 'button',
+          className: 'dsh-ann-dock-action',
+          disabled: state.busy,
+          onClick: () => controller.open(sessionId).catch(() => undefined),
+        },
+        t('dock.resume'),
+      ),
+    )
+  } else {
+    buttons.push(
+      React.createElement(
+        'button',
+        {
+          key: 'clear',
           type: 'button',
           className: 'dsh-ann-dock-action',
           disabled: state.busy,
@@ -277,16 +290,54 @@ export function ComposerDock({ controller, sessionId, inputActions, t }: Compose
         },
         t('dock.cancel'),
       ),
+    )
+  }
+  buttons.push(
+    React.createElement(
+      'button',
+      {
+        key: 'write',
+        type: 'button',
+        className: 'dsh-ann-dock-action is-primary',
+        disabled: state.busy,
+        onClick: () => controller.write(sessionId).catch(() => undefined),
+      },
+      t('dock.finish'),
+    ),
+  )
+  if (paused) {
+    buttons.push(
       React.createElement(
         'button',
         {
+          key: 'discard',
           type: 'button',
-          className: 'dsh-ann-dock-action is-primary',
+          className: 'dsh-ann-dock-action',
+          title: t('dock.cancel'),
+          'aria-label': t('dock.cancel'),
           disabled: state.busy,
-          onClick: () => controller.finish(sessionId).catch(() => undefined),
+          onClick: () => controller.discard(sessionId).catch(() => undefined),
         },
-        t('dock.finish'),
+        '×',
       ),
+    )
+  }
+
+  return React.createElement(
+    'div',
+    { className: 'dsh-ann-dock-row', ref: rowRef },
+    React.createElement(
+      'div',
+      { className: 'dsh-ann-dock' + (state.hint !== null && state.hint.kind !== 'info' ? ' is-warn' : '') + (paused ? ' is-paused' : '') },
+      PenIcon(),
+      React.createElement(
+        'span',
+        { className: 'dsh-ann-dock-text' },
+        title,
+        React.createElement('span', { className: 'dsh-ann-dock-hint' }, ' · ' + hintText),
+      ),
+      React.createElement('span', { className: 'dsh-ann-dock-spacer' }),
+      ...buttons,
     ),
   )
 }

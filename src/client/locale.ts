@@ -3,7 +3,8 @@
 export const zh: Record<string, string> = {
   'toggle.label': '批注',
   'toggle.title': '批注右侧浏览器页面',
-  'toggle.exit': '退出批注并写入输入框',
+  'toggle.exit': '暂停批注（标记会保留在页面上）',
+  'toggle.resume': '继续批注（{count} 条标记）',
   'toggle.hint': '打开右侧浏览器页面后可批注',
   'dock.title': '网页批注',
   'dock.count': '共 {count} 条',
@@ -11,6 +12,8 @@ export const zh: Record<string, string> = {
   'dock.editing': '正在页面内输入第 {index} 条…',
   'dock.finish': '写入输入框',
   'dock.cancel': '取消',
+  'dock.resume': '继续批注',
+  'dock.pausedHint': '标记已保留在页面上，点击编号可继续修改。',
   'dock.images': '{count} 张图片',
   'hint.noBrowser': '右侧边栏没有可批注的页面：请先在右侧 Browser 标签中打开一个网页。',
   'hint.collapsed': '右侧边栏未展开：请先展开右侧边栏的 Browser 标签。',
@@ -30,12 +33,18 @@ export const zh: Record<string, string> = {
   'editor.imageTooLarge': '图片超过 8MB，已忽略',
   'editor.imageLimit': '每条批注最多 4 张图片',
   'editor.imageUnsupported': '仅支持 PNG / JPEG / WebP / GIF',
+  'bar.title': '正在批注 · {count} 条',
+  'bar.write': '写入输入框',
+  'bar.writing': '正在写入…',
+  'bar.clear': '清空',
+  'bar.exit': '退出批注',
 }
 
 export const en: Record<string, string> = {
   'toggle.label': 'Annotate',
   'toggle.title': 'Annotate the right-Sidebar browser page',
-  'toggle.exit': 'Exit annotation and insert into the composer',
+  'toggle.exit': 'Pause annotation (markers stay on the page)',
+  'toggle.resume': 'Continue annotating ({count} markers)',
   'toggle.hint': 'Open a page in the right-Sidebar browser first',
   'dock.title': 'Web annotations',
   'dock.count': '{count} annotations',
@@ -43,6 +52,8 @@ export const en: Record<string, string> = {
   'dock.editing': 'Editing annotation {index} on the page…',
   'dock.finish': 'Insert into composer',
   'dock.cancel': 'Cancel',
+  'dock.resume': 'Continue annotating',
+  'dock.pausedHint': 'Markers stay on the page; click a number to edit it.',
   'dock.images': '{count} images',
   'hint.noBrowser': 'No annotatable page in the right sidebar: open a page in a right-Sidebar Browser tab first.',
   'hint.collapsed': 'The right sidebar is collapsed: expand its Browser tab first.',
@@ -62,6 +73,11 @@ export const en: Record<string, string> = {
   'editor.imageTooLarge': 'Image is over 8 MB and was skipped',
   'editor.imageLimit': 'Up to 4 images per annotation',
   'editor.imageUnsupported': 'Only PNG / JPEG / WebP / GIF are supported',
+  'bar.title': 'Annotating · {count}',
+  'bar.write': 'Insert into composer',
+  'bar.writing': 'Inserting…',
+  'bar.clear': 'Clear',
+  'bar.exit': 'Exit annotation',
 }
 
 export function fill(template: string, params?: Record<string, string | number>): string {

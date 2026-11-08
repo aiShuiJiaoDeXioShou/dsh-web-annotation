@@ -9,10 +9,16 @@
  * `docs/REFACTOR.md`.
  *
  * Interesting bits:
+ * - ChatGPT-style pause: `stop()` only pauses mode. Records and their boxes/pins
+ *   stay on the page and remain clickable so a later `start()` (or a pin click)
+ *   resumes editing from where the user left off.
  * - `start()` is restart-safe: it always re-creates/re-shows the overlay and
  *   capture layers, re-installs the pointer listeners and resets hover/region
  *   state. The old "open -> exit -> open" bug came from a one-shot listener
  *   guard that survived stop().
+ * - The in-page bottom bar (`data-dsh-annotate="hud"`) is the ChatGPT-style
+ *   action bar: write queues the one-shot `commit` action the plugin consumes,
+ *   clear/exit pause the mode.
  * - Records carry full image data URLs; `status()`/`collect()` only ever expose
  *   image metadata, `collectImages()` is the only way to read the bytes.
  * - There is no screenshot/capturePage code any more.
@@ -21,12 +27,20 @@ import type {
   AnnotationPayload,
   CollectedBatch,
   CollectedImages,
+  RuntimeAction,
   RuntimeHudTexts,
   RuntimeImage,
   RuntimeImageMeta,
   RuntimeRecord,
   RuntimeStatus,
 } from '../shared/types.js'
+
+/**
+ * Runtime protocol version. Keep the local `VERSION` literal inside
+ * `runtimeMain` in sync: the injected function source cannot reference module
+ * scope, so it must stay a literal there.
+ */
+export const RUNTIME_VERSION = 6
 
 /** Options accepted when the runtime source is injected into the page. */
 export interface RuntimeMainOptions {
@@ -46,6 +60,7 @@ export interface RuntimeApi {
   openEditor(recordId: string): { ok: boolean }
   closeEditor(mode?: 'commit' | 'cancel'): { ok: boolean; closed?: boolean; revision?: number }
   remove(recordId: string): { ok: boolean; revision?: number }
+  takeAction(): RuntimeAction | null
   clear(): { ok: boolean; revision?: number }
   setVisible(visible: boolean): { ok: boolean }
   dispose(): void
@@ -61,7 +76,7 @@ export interface RuntimeApi {
 export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | null): RuntimeApi {
   'use strict'
   var KEY = '__DSH_WEB_ANNOTATE__'
-  var VERSION = 5
+  var VERSION = 6
   var Z = 2147483600
   var MAX_IMAGES = 4
   var MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -92,6 +107,7 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     hud: {},
     down: null,
     region: null,
+    pendingAction: null,
     nextId: 0,
     nextImageId: 0,
   }
@@ -113,6 +129,7 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
   var captureLayer: any = null
   var hoverBox: any = null
   var regionBox: any = null
+  var bar: any = null
   var layerFresh = false
   var listenersInstalled = false
   var disposed = false
@@ -422,6 +439,7 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     captureLayer = null
     hoverBox = null
     regionBox = null
+    bar = null
     resetRecordNodes()
     if (stale) {
       try { stale.remove() } catch (error) { /* ignore */ }
@@ -473,6 +491,155 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     }
     hide(hoverBox)
     hide(regionBox)
+  }
+
+  // ---------------------------------------------------------------------------
+  // In-page bottom action bar (ChatGPT-style)
+  // ---------------------------------------------------------------------------
+
+  function isBarTarget(target: any) {
+    var node = target
+    while (node) {
+      if (node.hasAttribute && node.getAttribute('data-dsh-annotate') === 'hud') return true
+      if (node === document.documentElement || node === document.body) return false
+      node = node.parentElement
+    }
+    return false
+  }
+
+  function barTitleText() {
+    return hudText('barTitle', '{count}').replace(/\{count\}/g, String(state.records.length))
+  }
+
+  function barButton(attr: string, label: string, aria: string) {
+    var button = document.createElement('button')
+    button.type = 'button'
+    button.setAttribute('data-dsh-annotate', attr)
+    button.textContent = label
+    if (aria !== '') {
+      button.setAttribute('aria-label', aria)
+      button.title = aria
+    }
+    css(button, {
+      border: '0', background: 'transparent', color: 'rgba(255,255,255,0.86)',
+      font: 'inherit', fontSize: '12px', cursor: 'pointer', borderRadius: '999px',
+      padding: '5px 8px', lineHeight: '1', flex: 'none',
+    })
+    button.addEventListener('pointerdown', function (event: any) {
+      try { event.stopPropagation() } catch (error) { /* ignore */ }
+    })
+    return button
+  }
+
+  function ensureBar() {
+    if (bar !== null && bar.el && connected(bar.el)) return bar
+    ensureLayer()
+    if (layerFresh) {
+      redrawRecords()
+      layerFresh = false
+    }
+    if (bar !== null && bar.el && connected(bar.el)) return bar
+    var el = makeBox({
+      position: 'fixed', left: '50%', bottom: '18px', transform: 'translateX(-50%)',
+      display: 'none', alignItems: 'center', gap: '6px', padding: '6px 8px 6px 14px',
+      background: 'rgba(27,29,34,0.94)', color: '#ffffff', borderRadius: '999px',
+      boxShadow: '0 8px 24px rgba(15,23,42,0.32)', boxSizing: 'border-box',
+      maxWidth: 'calc(100vw - 24px)', pointerEvents: 'auto', zIndex: '4',
+      font: '500 12px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+    })
+    el.setAttribute('data-dsh-annotate', 'hud')
+    var title = document.createElement('span')
+    title.setAttribute('data-dsh-annotate', 'hud-title')
+    css(title, { whiteSpace: 'nowrap', color: 'rgba(255,255,255,0.92)', flex: 'none' })
+
+    var clearButton = barButton('hud-clear', hudText('barClear', 'Clear'), hudText('barClear', 'Clear'))
+    var writeButton = barButton('hud-write', hudText('barWrite', 'Insert'), hudText('barWrite', 'Insert'))
+    var exitButton = barButton('hud-exit', '×', hudText('barExit', 'Exit'))
+    css(writeButton, {
+      background: '#2563eb', color: '#ffffff', padding: '5px 12px', marginLeft: '2px',
+    })
+    css(exitButton, { fontSize: '16px', padding: '3px 7px', color: 'rgba(255,255,255,0.72)' })
+
+    clearButton.addEventListener('click', function (event: any) {
+      try { event.preventDefault(); event.stopPropagation() } catch (error) { /* ignore */ }
+      barClear()
+    })
+    writeButton.addEventListener('click', function (event: any) {
+      try { event.preventDefault(); event.stopPropagation() } catch (error) { /* ignore */ }
+      barWrite()
+    })
+    exitButton.addEventListener('click', function (event: any) {
+      try { event.preventDefault(); event.stopPropagation() } catch (error) { /* ignore */ }
+      barExit()
+    })
+
+    el.appendChild(title)
+    el.appendChild(clearButton)
+    el.appendChild(writeButton)
+    el.appendChild(exitButton)
+    layer.appendChild(el)
+    bar = {
+      el: el,
+      title: title,
+      clearButton: clearButton,
+      writeButton: writeButton,
+      exitButton: exitButton,
+    }
+    return bar
+  }
+
+  function setBarBusy(current: any, busy: boolean) {
+    if (current === null || current === undefined) return
+    var buttons = [current.clearButton, current.writeButton, current.exitButton]
+    for (var index = 0; index < buttons.length; index += 1) {
+      if (buttons[index]) buttons[index].disabled = busy
+    }
+    if (current.writeButton) {
+      current.writeButton.textContent = busy ? hudText('barWriting', 'Writing…') : hudText('barWrite', 'Insert')
+      current.writeButton.style.opacity = busy ? '0.72' : '1'
+    }
+  }
+
+  function syncBar() {
+    var current = ensureBar()
+    current.title.textContent = barTitleText()
+    current.el.style.display = state.active === true ? 'flex' : 'none'
+    setBarBusy(current, state.pendingAction !== null)
+    return current
+  }
+
+  function hideBar() {
+    if (bar !== null && bar.el) bar.el.style.display = 'none'
+  }
+
+  function barWrite() {
+    if (state.active !== true) return
+    state.pendingAction = 'commit'
+    state.revision += 1
+    syncBar()
+  }
+
+  function barClear() {
+    if (state.active !== true) return
+    state.pendingAction = null
+    clearRecords()
+    stopMode()
+  }
+
+  function barExit() {
+    if (state.active !== true) return
+    state.pendingAction = null
+    stopMode()
+  }
+
+  function takeAction(): RuntimeAction | null {
+    var action = state.pendingAction
+    state.pendingAction = null
+    if (action !== null) {
+      state.revision += 1
+      if (bar !== null && bar.el && connected(bar.el)) setBarBusy(bar, false)
+    }
+    return action
   }
 
   function place(node: any, x: number, y: number, width: number, height: number) {
@@ -573,6 +740,7 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     state.records = state.records.filter(function (entry: any) { return entry !== record })
     renumber()
     state.revision += 1
+    if (bar !== null && bar.el && connected(bar.el)) syncBar()
   }
 
   function removeRecord(id: any) {
@@ -596,7 +764,21 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
       }
     }
     state.records = []
+    state.pendingAction = null
     state.revision += 1
+    if (bar !== null && bar.el && connected(bar.el)) syncBar()
+    // Nothing left to draw: hide the whole overlay, even if the plugin has not
+    // called stop() yet. start() re-shows it on the next open.
+    if (state.records.length === 0) {
+      hide(hoverBox)
+      hide(regionBox)
+      hideBar()
+      if (captureLayer) {
+        captureLayer.style.pointerEvents = 'none'
+        captureLayer.style.display = 'none'
+      }
+      if (layer) layer.style.display = 'none'
+    }
     return { ok: true, revision: state.revision }
   }
 
@@ -1143,6 +1325,7 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     state.revision += 1
     hide(hoverBox)
     openEditor(record)
+    syncBar()
     return { ok: true, id: record.id, revision: state.revision }
   }
 
@@ -1158,8 +1341,9 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
   }
 
   function onPointerDown(event: any) {
-    if (!state.active) return
+    if (isBarTarget(event.target)) return
     if (event.button !== undefined && event.button !== 0 && event.pointerType !== 'touch') return
+    // An open editor is committed on any outside pointerdown, even while paused.
     if (state.editor !== null) {
       var inside = false
       try { inside = state.editor.el.contains(event.target) } catch (error) { inside = false }
@@ -1169,6 +1353,7 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
       }
       return
     }
+    if (!state.active) return
     if (isPinTarget(event.target) !== null) return
     state.down = { x: event.clientX, y: event.clientY }
     state.region = null
@@ -1202,9 +1387,10 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
   }
 
   function onPointerUp(event: any) {
-    if (!state.active) return
+    if (isBarTarget(event.target)) return
     if (event.button !== undefined && event.button !== 0 && event.pointerType !== 'touch') return
     if (state.editor !== null) return
+    if (!state.active) return
     if (state.region !== null) {
       var rect = finishRegionAt(event)
       hide(regionBox)
@@ -1227,7 +1413,8 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
   }
 
   function onClick(event: any) {
-    if (!state.active) return
+    if (isBarTarget(event.target)) return
+    // Pins stay live while paused: clicking a number reopens its note.
     var pin = isPinTarget(event.target)
     if (pin !== null) {
       try { event.preventDefault(); event.stopPropagation() } catch (error) { /* ignore */ }
@@ -1237,19 +1424,27 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
       if (id !== '') openEditorById(id)
       return
     }
+    if (!state.active) return
     if (state.editor !== null) return
     try { event.preventDefault(); event.stopPropagation() } catch (error) { /* ignore */ }
     if (event.stopImmediatePropagation) event.stopImmediatePropagation()
   }
 
   function onKeyDown(event: any) {
-    if (!state.active) return
     if (event.isComposing === true) return
     if (event.key !== 'Escape') return
+    // Esc closes an open editor regardless of pause state; only when there is
+    // no editor and annotation mode is live does it pause the mode.
+    if (state.editor !== null) {
+      try { event.preventDefault(); event.stopPropagation() } catch (error) { /* ignore */ }
+      if (event.stopImmediatePropagation) event.stopImmediatePropagation()
+      closeEditor('cancel')
+      return
+    }
+    if (!state.active) return
     try { event.preventDefault(); event.stopPropagation() } catch (error) { /* ignore */ }
     if (event.stopImmediatePropagation) event.stopImmediatePropagation()
-    if (state.editor !== null) closeEditor('cancel')
-    else stopMode()
+    stopMode()
   }
 
   function onPointerCancel() {
@@ -1324,6 +1519,7 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
       revision: state.revision,
       count: records.length,
       records: records,
+      action: state.pendingAction,
       url: info.url,
       title: info.title,
       viewport: { width: window.innerWidth, height: window.innerHeight },
@@ -1375,9 +1571,11 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     state.active = true
     state.down = null
     state.region = null
-    if (state.editor !== null) closeEditor('cancel')
+    if (state.editor !== null) closeEditor('commit')
+    // Records are intentionally kept: re-arming only re-enables picking.
     armLayer()
     installListeners()
+    syncBar()
     state.revision += 1
     return { ok: true }
   }
@@ -1389,11 +1587,14 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     state.region = null
     hide(hoverBox)
     hide(regionBox)
+    hideBar()
     if (captureLayer) {
       captureLayer.style.pointerEvents = 'none'
       captureLayer.style.display = 'none'
     }
-    if (layer) layer.style.display = 'none'
+    // PAUSE, not teardown: keep the markers layer visible while records exist
+    // (ChatGPT-style) so pins stay clickable and a later start() resumes.
+    if (layer) layer.style.display = state.records.length > 0 ? 'block' : 'none'
     state.revision += 1
     return { ok: true }
   }
@@ -1433,6 +1634,7 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     captureLayer = null
     hoverBox = null
     regionBox = null
+    bar = null
     layerFresh = false
     disposed = true
     try {
@@ -1453,6 +1655,7 @@ export function runtimeMain(options?: RuntimeMainOptions | RuntimeHudTexts | nul
     openEditor: openEditorById,
     closeEditor: closeEditor,
     remove: removeRecord,
+    takeAction: takeAction,
     clear: clearRecords,
     setVisible: setVisible,
     dispose: dispose,

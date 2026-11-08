@@ -84,6 +84,9 @@ export interface RuntimeRecord {
   images: RuntimeImageMeta[]
 }
 
+/** One queued page-side command the plugin poll loop consumes exactly once. */
+export type RuntimeAction = 'commit'
+
 /** Snapshot used by the plugin poll loop; deliberately image-free. */
 export interface RuntimeStatus {
   version: number
@@ -96,6 +99,8 @@ export interface RuntimeStatus {
   records: RuntimeRecord[]
   url: string
   title: string
+  /** Page-side command (bottom-bar "write into composer"), consumed once. */
+  action: RuntimeAction | null
   viewport: { width: number; height: number }
   scroll: { x: number; y: number }
 }
@@ -110,6 +115,12 @@ export interface RuntimeHudTexts {
   editorImageTooLarge: string
   editorImageLimit: string
   editorImageUnsupported: string
+  /** Bottom bar title template; `{count}` is replaced by the record count. */
+  barTitle: string
+  barWrite: string
+  barWriting: string
+  barClear: string
+  barExit: string
 }
 
 /** One committed annotation batch the controller turns into composer content. */

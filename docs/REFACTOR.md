@@ -9,10 +9,12 @@ the shared source of truth for everyone working in this repository.
    files, screenshots-on-disk, `/dsh-annotate/*` Host routes, `agent/pre-step`
    message rewriting and the pending-batch host state. The plugin is a
    client-only bundle with a no-op Host entry.
-2. **Notes go straight into the composer.** Finishing annotation mode inserts
-   one compact text block into the current session's composer draft through the
-   public `inputActions.insertText` API. The user reviews/edits/sends it like
-   their own text. Multiple batches accumulate in the same draft.
+2. **Notes go straight into the composer, but only on an explicit submit.**
+   Annotations persist as numbered page markers across pause/resume (ChatGPT
+   style); the explicit "写入输入框" action (in-page bottom bar or the dock row)
+   inserts one compact text block into the composer draft through the public
+   `inputActions.insertText` API, then clears the page batch. Exiting annotation
+   mode is a pause, not a submit.
 3. **Images are real composer attachments.** The inline annotation bubble can
    attach images (file picker or paste). On finish those images are registered
    as browser-owned draft attachments through the Conversation service
@@ -55,17 +57,18 @@ It installs `window.__DSH_WEB_ANNOTATE__` and must return an API object:
 
 ```ts
 interface RuntimeApi {
-  version: number
-  start(options: { hud: RuntimeHudTexts }): { ok: true }
-  stop(): { ok: true }
-  status(): RuntimeStatus      // alive/active/editorOpen/revision/count/records/url/title/viewport/scroll
-  pull(): RuntimeStatus        // alias of status()
-  collect(): CollectedBatch    // records without image bytes
+  version: number                       // exported as RUNTIME_VERSION, bumped on contract change
+  start(options: { hud: RuntimeHudTexts }): { ok: true }   // arm capture, keep records
+  stop(): { ok: true }                  // PAUSE: capture off, records/markers stay visible
+  status(): RuntimeStatus               // includes action: 'commit' | null
+  pull(): RuntimeStatus                 // alias of status()
+  collect(): CollectedBatch             // records without image bytes
   collectImages(): CollectedImages
-  openEditor(recordId: string): { ok: boolean }
+  takeAction(): 'commit' | null         // consume the in-page bottom-bar command once
+  openEditor(recordId): { ok: boolean }
   closeEditor(mode?: 'commit' | 'cancel'): { ok: boolean }
   remove(recordId: string): { ok: boolean }
-  clear(): { ok: boolean }
+  clear(): { ok: boolean }              // drop records + hide the marker layer
   setVisible(visible: boolean): { ok: boolean }
   dispose(): void
 }
@@ -73,39 +76,46 @@ interface RuntimeApi {
 
 Runtime requirements:
 
-- `start()` is idempotent and always (re)arms gesture handling: overlay layer,
-  capture layer, pointer listeners, hover box. It must work after any number of
-  `stop()`/`start()` cycles and after `dispose()` re-injection.
-- `stop()` deactivates gestures and hides the overlay but keeps records so the
-  controller can `collect()` first.
-- `clear()` removes all records, the inline editor and their image state.
-- Inline editor footer has: add-image button (opens a hidden file input),
-  confirm (✓) and delete (trash). Pasting an image into the textarea attaches
-  it too. Up to 4 images per annotation, each ≤ 8 MiB, only
-  png/jpeg/webp/gif. Thumbnails render inside the bubble with a remove control.
-- Images live on the record (`record.images` full data URL + metadata); the
-  lightweight `collect()`/`status()` only expose metadata.
-- Locale strings for the new image controls come from `RuntimeHudTexts`.
+- `stop()` pauses: the capture layer and bottom bar hide, the open editor
+  commits, **records stay rendered** (translucent boxes + numbered pins) and
+  pins remain clickable for editing. Only an empty record list hides the layer.
+- `start()` re-arms capture and shows the in-page bottom bar without touching
+  records.
+- In-page bottom bar (fixed, bottom center, dark pill, only while active):
+  localized title with `{count}`, buttons 清空 / 写入输入框 / ×. The write button
+  queues `action = 'commit'`; `takeAction()` returns and clears it, and the bar
+  must become usable again if the plugin's write fails. Bar interactions are
+  never treated as annotation gestures.
+- Clicking a pin works while paused and opens that annotation's inline editor;
+  outside click commits, Escape cancels regardless of active state. Escape with
+  no editor pauses the mode.
+- `start()` is idempotent and restart-safe; `dispose()` removes every listener
+  and re-injection restores a clean runtime.
+- Inline editor footer: add-image button (hidden file input), confirm, delete;
+  paste attaches images. Up to 4 images per annotation, each ≤ 8 MiB, only
+  png/jpeg/webp/gif, localized errors, thumbnails with remove controls.
+- Images live on the record; `collect()`/`status()` expose metadata only,
+  `collectImages()` returns full data URLs.
 - Keep the existing gestures: click element, click blank space (point), drag
-  region, pin click to re-edit, Escape to exit, outside click commits, empty
-  annotation (no comment and no images) is discarded. An explicit "cancel" on a
-  draft that already carries images keeps it as an image-only record instead of
-  throwing the bytes away; in-flight FileReader reads also count as images so
-  pressing Enter right after picking a file does not lose it.
+  region, pin click edits, empty annotation (no comment and no images) is
+  discarded.
 
 ## Controller rules
 
-- `open(sessionId)`: resolve the visible webview; ensure/inject runtime; call
-  `start`; verify `status().active === true`; publish open state. On failure set
-  a localised hint and leave state closed.
-- `finish(sessionId)`: guard re-entry (`finishing`), close the page editor,
-  `collect` + `collectImages`, build text, insert into composer, attach images,
-  then `clear` + `stop`; always reset open/finishing state in `finally`.
-- `toggle(sessionId)` chooses open/finish and ignores clicks while busy, so a
-  rapid second click cannot race a half-finished transition.
-- Polls (`250 ms`) only while open; they sync projection state to the UI and
-  detect the page being gone. No Host network calls.
-- No `localStorage` persistence; a closed batch lives in the composer draft.
+- `toggle()`: armed -> pause; paused -> arm. It never writes.
+- `open()`: resolve the visible webview; `ensureRuntime` **reuses** a live
+  compatible runtime so the batch/markers persist; otherwise inject then
+  `start`. The runtime status is the source of truth for records.
+- `pause()`: `stop()` only; keep records, keep polling so pin edits and page
+  loss stay in sync.
+- `write()` (explicit): close the page editor, `collect` + `collectImages`,
+  build text, insert into the composer, attach images, then `clear` + `stop`
+  and reset the dock state. A busy composer keeps the page batch for retry.
+- The poll (250 ms) consumes a queued `'commit'` action once, mirrors the
+  `active` flag (page-side Esc / bar exit pauses), and clears a stale batch
+  when the guest was recreated/navigated.
+- `discard()` clears the page markers without inserting anything.
+- Toggle/write/pause transitions are serialised; no Host calls, no persistence.
 
 ## Verification
 

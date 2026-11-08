@@ -13,10 +13,10 @@ import * as React from 'react'
 
 import type { BrowserView } from './target.js'
 import { resolveBrowserTarget } from './target.js'
-import { injectRuntime, startRuntime, stopRuntime, clearRuntime } from './target.js'
+import { ensureRuntime, startRuntime, stopRuntime, clearRuntime, takeRuntimeAction } from './target.js'
 import { createAttachmentBridge, type ConversationFace } from './attachments.js'
 import { AnnotationController } from './controller.js'
-import { runtimeMain } from './runtime.js'
+import { RUNTIME_VERSION, runtimeMain } from './runtime.js'
 import { en, fill, zh } from './locale.js'
 import { ChromeToggle, ComposerDock, CSS_TEXT } from './ui.js'
 
@@ -96,10 +96,11 @@ export function apply(ctx: PluginContext): void {
 
   const controller = new AnnotationController({
     resolveTarget: (sessionId) => resolveBrowserTarget(sessionId, focus.element),
-    injectRuntime: (view) => injectRuntime(view, RUNTIME_SOURCE),
+    ensureRuntime: (view) => ensureRuntime(view, RUNTIME_SOURCE, RUNTIME_VERSION),
     startRuntime: (view, hud) => startRuntime(view, hud),
     stopRuntime: (view) => stopRuntime(view),
     clearRuntime: (view) => clearRuntime(view),
+    takeRuntimeAction: (view) => takeRuntimeAction(view),
     getInputActions: (sessionId) => controller.getInputActions(sessionId),
     attachments: createAttachmentBridge(resolveConversation),
     t,
