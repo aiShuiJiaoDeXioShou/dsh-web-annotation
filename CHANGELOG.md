@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.4
+
+### Fixed
+
+- The cursor arrow inside the annotate glyph is now geometrically centred in the
+  corner-bracket frame (its bounding box centre sits exactly on the 8,8 grid
+  centre) and scaled up so it stays legible at 15px, instead of sitting in the
+  bottom-right quadrant.
+- Cursor stroke widened slightly (1.15) to keep its optical weight balanced with
+  the filled corner brackets.
+
 ## 0.2.3
 
 Sidebar icon aligned with DSH's own toolbar artwork.

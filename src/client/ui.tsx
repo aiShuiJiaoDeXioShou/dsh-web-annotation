@@ -47,10 +47,10 @@ export function AnnotateIcon({ size = 15 }: { size?: number }) {
     { width: size, height: size, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true', focusable: 'false' },
     React.createElement('path', { d: CORNER_GLYPH_PATH, fill: 'currentColor' }),
     React.createElement('path', {
-      d: 'M7.55 6.85 L12.3 8.75 L10.15 9.55 L9.35 11.7 Z',
+      d: 'M5.03 4.97 L10.97 7.34 L8.28 8.34 L7.28 11.03 Z',
       fill: 'none',
       stroke: 'currentColor',
-      'stroke-width': '1.1',
+      'stroke-width': '1.15',
       'stroke-linejoin': 'round',
       'stroke-linecap': 'round',
     }),
@@ -64,7 +64,7 @@ const CORNER_GLYPH_PATH =
 const ANNOTATE_GLYPH_HTML =
   '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false" style="display:block">' +
   '<path d="' + CORNER_GLYPH_PATH + '" fill="currentColor"/>' +
-  '<path d="M7.55 6.85 L12.3 8.75 L10.15 9.55 L9.35 11.7 Z" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" stroke-linecap="round"/>' +
+  '<path d="M5.03 4.97 L10.97 7.34 L8.28 8.34 L7.28 11.03 Z" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round" stroke-linecap="round"/>' +
   '</svg>'
 
 
