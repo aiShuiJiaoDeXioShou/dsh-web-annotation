@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.3
+
+Sidebar icon aligned with DSH's own toolbar artwork.
+
+### Changed
+
+- The annotate glyph now reuses DSH's exact 16x16 corner-bracket artwork (filled,
+  1 unit thick, 1.33 unit margins) and renders inside a 15px box, matching the
+  size, optical weight and colour of the neighbouring right-sidebar icons; the
+  cursor arrow is the only ChatGPT addition.
+- The icon container is a block-level 15x15 grid inside a 28px inline-flex
+  button, so the glyph is vertically/horizontally centered next to its 批注
+  label instead of looking small and high.
+- Active/has-batch tint now derives from `--dsw-alias-brand-primary`, so it
+  follows the host theme (light/dark) instead of a hard-coded light blue.
+
 ## 0.2.2
 
 ChatGPT-aligned annotation visuals and a clearer image intake.
